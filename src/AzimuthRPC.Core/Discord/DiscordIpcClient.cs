@@ -1,6 +1,8 @@
 using System.Buffers.Binary;
 using System.IO;
 using System.IO.Pipes;
+using System.Net;
+using System.Net.Sockets;
 using System.Text.Json;
 
 namespace AzimuthRPC;
@@ -12,79 +14,193 @@ internal sealed class DiscordIpcClient : IAsyncDisposable
     private const int CloseOpcode = 2;
     private const int PingOpcode = 3;
     private const int PongOpcode = 4;
+    private const string BridgeEnvironmentVariable = "AZIMUTHRPC_DISCORD_TCP";
 
     private readonly string _applicationId;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
-    private NamedPipeClientStream? _pipe;
+    private Stream? _stream;
     private CancellationTokenSource? _receiveCts;
     private Task? _receiveTask;
     private volatile bool _connected;
 
-    public bool IsConnected => _connected && _pipe is { IsConnected: true };
+    public bool IsConnected => _connected && _stream is not null;
     public string? Username { get; private set; }
 
     public DiscordIpcClient(string applicationId) => _applicationId = applicationId.Trim();
 
     public async Task<bool> ConnectAsync(CancellationToken cancellationToken)
     {
-        await DisposePipeOnlyAsync();
+        await DisposeTransportOnlyAsync();
 
+        try
+        {
+            _stream = await OpenTransportAsync(cancellationToken);
+            if (_stream is null) return false;
+
+            await SendJsonFrameAsync(HandshakeOpcode, new { v = 1, client_id = _applicationId }, cancellationToken);
+
+            using var handshakeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            handshakeCts.CancelAfter(TimeSpan.FromSeconds(5));
+            while (!handshakeCts.IsCancellationRequested)
+            {
+                IpcFrame frame = await ReadFrameAsync(_stream, handshakeCts.Token);
+                if (frame.Opcode == PingOpcode)
+                {
+                    await SendRawFrameAsync(PongOpcode, frame.Payload, handshakeCts.Token);
+                    continue;
+                }
+                if (frame.Opcode == CloseOpcode)
+                    throw new IOException("Discord closed the IPC connection during handshake.");
+                if (frame.Opcode != FrameOpcode) continue;
+
+                using JsonDocument doc = JsonDocument.Parse(frame.Payload);
+                JsonElement root = doc.RootElement;
+                if (root.TryGetProperty("evt", out JsonElement evt) &&
+                    string.Equals(evt.GetString(), "READY", StringComparison.OrdinalIgnoreCase))
+                {
+                    Username = TryGetUsername(root);
+                    _connected = true;
+                    StartReceiver();
+                    return true;
+                }
+                if (root.TryGetProperty("evt", out evt) &&
+                    string.Equals(evt.GetString(), "ERROR", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException(TryGetErrorMessage(root) ?? "Discord returned an IPC error.");
+            }
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            await DisposeTransportOnlyAsync();
+            return false;
+        }
+        catch (IOException)
+        {
+            await DisposeTransportOnlyAsync();
+            return false;
+        }
+        catch
+        {
+            await DisposeTransportOnlyAsync();
+            throw;
+        }
+
+        await DisposeTransportOnlyAsync();
+        return false;
+    }
+
+    private static async Task<Stream?> OpenTransportAsync(CancellationToken cancellationToken)
+    {
+        string? bridge = Environment.GetEnvironmentVariable(BridgeEnvironmentVariable);
+        if (!string.IsNullOrWhiteSpace(bridge))
+            return await OpenTcpBridgeAsync(bridge.Trim(), cancellationToken);
+
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+            return await OpenUnixSocketAsync(cancellationToken);
+
+        return await OpenWindowsPipeAsync(cancellationToken);
+    }
+
+    private static async Task<Stream?> OpenTcpBridgeAsync(string endpoint, CancellationToken cancellationToken)
+    {
+        if (!TryParseLoopbackEndpoint(endpoint, out IPAddress? address, out int port))
+            throw new InvalidOperationException($"{BridgeEnvironmentVariable} must be a loopback endpoint such as 127.0.0.1:64630.");
+
+        var socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromMilliseconds(750));
+            await socket.ConnectAsync(new IPEndPoint(address, port), timeout.Token);
+            return new NetworkStream(socket, ownsSocket: true);
+        }
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
+    }
+
+    private static bool TryParseLoopbackEndpoint(string value, out IPAddress? address, out int port)
+    {
+        address = null;
+        port = 0;
+        int separator = value.LastIndexOf(':');
+        if (separator <= 0 || separator == value.Length - 1 ||
+            !int.TryParse(value[(separator + 1)..], out port) || port is < 1 or > 65535)
+            return false;
+
+        string host = value[..separator].Trim('[', ']', ' ');
+        if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase))
+            address = IPAddress.Loopback;
+        else if (!IPAddress.TryParse(host, out address) || !IPAddress.IsLoopback(address))
+            return false;
+
+        return true;
+    }
+
+    private static async Task<Stream?> OpenWindowsPipeAsync(CancellationToken cancellationToken)
+    {
         for (int i = 0; i < 10; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var pipe = new NamedPipeClientStream(".", $"discord-ipc-{i}", PipeDirection.InOut, PipeOptions.Asynchronous);
-
             try
             {
-                using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                connectCts.CancelAfter(TimeSpan.FromMilliseconds(350));
-                await pipe.ConnectAsync(connectCts.Token);
-                _pipe = pipe;
-
-                await SendJsonFrameAsync(HandshakeOpcode, new { v = 1, client_id = _applicationId }, cancellationToken);
-
-                using var handshakeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                handshakeCts.CancelAfter(TimeSpan.FromSeconds(5));
-                while (!handshakeCts.IsCancellationRequested)
-                {
-                    IpcFrame frame = await ReadFrameAsync(pipe, handshakeCts.Token);
-                    if (frame.Opcode == PingOpcode)
-                    {
-                        await SendRawFrameAsync(PongOpcode, frame.Payload, handshakeCts.Token);
-                        continue;
-                    }
-                    if (frame.Opcode == CloseOpcode)
-                        throw new IOException("Discord closed the IPC connection during handshake.");
-                    if (frame.Opcode != FrameOpcode) continue;
-
-                    using JsonDocument doc = JsonDocument.Parse(frame.Payload);
-                    JsonElement root = doc.RootElement;
-                    if (root.TryGetProperty("evt", out JsonElement evt) &&
-                        string.Equals(evt.GetString(), "READY", StringComparison.OrdinalIgnoreCase))
-                    {
-                        Username = TryGetUsername(root);
-                        _connected = true;
-                        StartReceiver();
-                        return true;
-                    }
-                    if (root.TryGetProperty("evt", out evt) &&
-                        string.Equals(evt.GetString(), "ERROR", StringComparison.OrdinalIgnoreCase))
-                        throw new InvalidOperationException(TryGetErrorMessage(root) ?? "Discord returned an IPC error.");
-                }
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeout.CancelAfter(TimeSpan.FromMilliseconds(350));
+                await pipe.ConnectAsync(timeout.Token);
+                return pipe;
             }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
-            catch (IOException) { }
-            catch
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
                 pipe.Dispose();
-                _pipe = null;
-                throw;
             }
-
-            pipe.Dispose();
-            _pipe = null;
+            catch (IOException)
+            {
+                pipe.Dispose();
+            }
         }
-        return false;
+        return null;
+    }
+
+    private static async Task<Stream?> OpenUnixSocketAsync(CancellationToken cancellationToken)
+    {
+        foreach (string path in DiscordUnixSocketPaths())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+            try
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeout.CancelAfter(TimeSpan.FromMilliseconds(350));
+                await socket.ConnectAsync(new UnixDomainSocketEndPoint(path), timeout.Token);
+                return new NetworkStream(socket, ownsSocket: true);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                socket.Dispose();
+            }
+            catch (SocketException)
+            {
+                socket.Dispose();
+            }
+        }
+        return null;
+    }
+
+    private static IEnumerable<string> DiscordUnixSocketPaths()
+    {
+        var roots = new HashSet<string>(StringComparer.Ordinal);
+        foreach (string variable in new[] { "XDG_RUNTIME_DIR", "TMPDIR", "TMP", "TEMP" })
+        {
+            string? value = Environment.GetEnvironmentVariable(variable);
+            if (!string.IsNullOrWhiteSpace(value)) roots.Add(value);
+        }
+        roots.Add("/tmp");
+
+        foreach (string root in roots)
+            for (int i = 0; i < 10; i++)
+                yield return Path.Combine(root, $"discord-ipc-{i}");
     }
 
     public async Task SetActivityAsync(PresenceOptions config, DateTime sessionStartUtc, string details, string state, CancellationToken cancellationToken)
@@ -145,13 +261,13 @@ internal sealed class DiscordIpcClient : IAsyncDisposable
 
     private async Task ReceiveLoopAsync(CancellationToken cancellationToken)
     {
-        NamedPipeClientStream? pipe = _pipe;
-        if (pipe is null) return;
+        Stream? stream = _stream;
+        if (stream is null) return;
         try
         {
-            while (!cancellationToken.IsCancellationRequested && pipe.IsConnected)
+            while (!cancellationToken.IsCancellationRequested)
             {
-                IpcFrame frame = await ReadFrameAsync(pipe, cancellationToken);
+                IpcFrame frame = await ReadFrameAsync(stream, cancellationToken);
                 if (frame.Opcode == PingOpcode)
                     await SendRawFrameAsync(PongOpcode, frame.Payload, cancellationToken);
                 else if (frame.Opcode == CloseOpcode)
@@ -171,7 +287,7 @@ internal sealed class DiscordIpcClient : IAsyncDisposable
 
     private async Task SendRawFrameAsync(int opcode, byte[] payload, CancellationToken cancellationToken)
     {
-        NamedPipeClientStream pipe = _pipe ?? throw new InvalidOperationException("Discord IPC is not connected.");
+        Stream stream = _stream ?? throw new InvalidOperationException("Discord IPC is not connected.");
         byte[] frame = new byte[8 + payload.Length];
         BinaryPrimitives.WriteInt32LittleEndian(frame.AsSpan(0, 4), opcode);
         BinaryPrimitives.WriteInt32LittleEndian(frame.AsSpan(4, 4), payload.Length);
@@ -180,8 +296,8 @@ internal sealed class DiscordIpcClient : IAsyncDisposable
         await _sendLock.WaitAsync(cancellationToken);
         try
         {
-            await pipe.WriteAsync(frame, cancellationToken);
-            await pipe.FlushAsync(cancellationToken);
+            await stream.WriteAsync(frame, cancellationToken);
+            await stream.FlushAsync(cancellationToken);
         }
         finally { _sendLock.Release(); }
     }
@@ -205,7 +321,7 @@ internal sealed class DiscordIpcClient : IAsyncDisposable
         while (offset < buffer.Length)
         {
             int read = await stream.ReadAsync(buffer.AsMemory(offset), cancellationToken);
-            if (read == 0) throw new EndOfStreamException("Discord IPC pipe was closed.");
+            if (read == 0) throw new EndOfStreamException("Discord IPC transport was closed.");
             offset += read;
         }
     }
@@ -236,32 +352,22 @@ internal sealed class DiscordIpcClient : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        _connected = false;
-        try { _receiveCts?.Cancel(); } catch { }
-        try { _pipe?.Dispose(); } catch { }
-        if (_receiveTask is not null)
-        {
-            try { await _receiveTask; } catch { }
-        }
-        _receiveCts?.Dispose();
-        _receiveCts = null;
-        _receiveTask = null;
-        _pipe = null;
-
+        await DisposeTransportOnlyAsync();
+        _sendLock.Dispose();
     }
 
-    private async Task DisposePipeOnlyAsync()
+    private async Task DisposeTransportOnlyAsync()
     {
         _connected = false;
-        _receiveCts?.Cancel();
-        if (_pipe is not null)
+        try { _receiveCts?.Cancel(); } catch { }
+        if (_stream is not null)
         {
-            await _pipe.DisposeAsync();
-            _pipe = null;
+            try { await _stream.DisposeAsync(); } catch { }
+            _stream = null;
         }
         if (_receiveTask is not null)
         {
-            try { await _receiveTask; } catch (OperationCanceledException) { }
+            try { await _receiveTask; } catch (OperationCanceledException) { } catch { }
         }
         _receiveCts?.Dispose();
         _receiveCts = null;
