@@ -1,14 +1,16 @@
-# AzimuthRPC v0.9.5
+# AzimuthRPC v0.9.6
 
-Reliability and diagnostics cleanup for both the standalone app and FH2ML native mod.
+FH2ML SDK integration for the native mod.
 
-- Throttled Discord Rich Presence updates to a minimum 4-second interval while still sending the latest pending state.
-- Moved standalone and native logs to `%LOCALAPPDATA%\AzimuthRPC\logs\AzimuthRPC.log`.
-- Logs now rotate to `AzimuthRPC.log.1` after 2 MB instead of deleting previous diagnostics.
-- Fixed the FH2ML native version string so it matches the packaged mod version.
-- CI now validates the standalone, manifest and native C++ versions together.
-- Removed the unused public `rpc-config.example.json` file; the standalone app does not expose file-based configuration.
-- Kept native teardown non-blocking to match FH2ML ABI v1, which has no hot-unload contract.
+- The FH2ML native DLL now consumes the official FH2ML Host API v1 instead of ignoring the initializer argument.
+- Registers `azimuth-rpc` and its version through `RegisterMod` during native initialization.
+- Mirrors native diagnostics into the FH2ML host log through `Log` while keeping the existing AzimuthRPC log.
+- Uses `GetGameModule()` as the authoritative FH2 base address and no longer scans the process address space with `VirtualQuery`.
+- Validates the FH2ML API table and the supported FH2 1.0.0.64 PE image before starting the RPC worker.
+- Vendors the MIT-licensed FH2ML SDK header used to build the native DLL.
+- Adds a CI contract check so the host-API integration cannot silently regress back to process scanning.
+
+The standalone app behavior is unchanged apart from the shared version bump.
 
 ## Supported game build
 
@@ -16,4 +18,4 @@ Forza Horizon 2 Xbox One build 1.0.0.64 via Azimuth.
 
 ## Reporting issues
 
-Logs are stored at `%LOCALAPPDATA%\AzimuthRPC\logs\AzimuthRPC.log`. If rotation occurs, the previous log is retained as `AzimuthRPC.log.1`.
+Logs are stored at `%LOCALAPPDATA%\AzimuthRPC\logs\AzimuthRPC.log`. If rotation occurs, the previous log is retained as `AzimuthRPC.log.1`. Native FH2ML diagnostics are also mirrored into the FH2ML log.
