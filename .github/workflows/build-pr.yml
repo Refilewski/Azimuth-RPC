@@ -126,6 +126,9 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
+    concurrency:
+      group: azimuthrpc-release-${{ needs.build.outputs.version }}
+      cancel-in-progress: false
 
     steps:
       - name: Checkout release notes
