@@ -40,9 +40,9 @@ constexpr std::uintptr_t kSimulationManagerVtableRva = 0x02C5FD70ull;
 constexpr std::size_t kCarIdOffset = 0x278;
 constexpr std::size_t kCarIdBytes = 64;
 constexpr char kDiscordApplicationId[] = "1445162899315363924";
-constexpr char kVersion[] = "0.9.3";
+constexpr char kVersion[] = "0.9.5";
 constexpr DWORD kDiscordReconnectMs = 5000;
-constexpr DWORD kPresenceUpdateMs = 2000;
+constexpr DWORD kPresenceUpdateMs = 4000;
 constexpr LONGLONG kMaxLogBytes = 2ll * 1024ll * 1024ll;
 
 std::atomic<bool> g_started{false};
@@ -88,44 +88,56 @@ struct IpcFrame
 
 std::wstring LogPath()
 {
-    wchar_t executable[MAX_PATH]{};
-    const DWORD length = GetModuleFileNameW(nullptr, executable, _countof(executable));
-    if (length == 0 || length >= _countof(executable))
-        return L"AzimuthRPC.log";
+    wchar_t localAppData[32768]{};
+    const DWORD length = GetEnvironmentVariableW(
+        L"LOCALAPPDATA",
+        localAppData,
+        static_cast<DWORD>(_countof(localAppData)));
 
-    std::wstring path(executable, length);
-    const std::size_t slash = path.find_last_of(L"\\/");
-    if (slash == std::wstring::npos)
-        path.clear();
-    else
-        path.resize(slash + 1);
+    if (length > 0 && length < _countof(localAppData))
+    {
+        std::wstring appDirectory(localAppData, length);
+        appDirectory += L"\\AzimuthRPC";
+        CreateDirectoryW(appDirectory.c_str(), nullptr);
 
-    path += L"AzimuthRPC.log";
-    return path;
+        std::wstring logDirectory = appDirectory + L"\\logs";
+        CreateDirectoryW(logDirectory.c_str(), nullptr);
+        return logDirectory + L"\\AzimuthRPC.log";
+    }
+
+    return L"AzimuthRPC.log";
 }
 
 void AppendLog(const std::string& message)
 {
     static const std::wstring path = LogPath();
 
-    HANDLE file = CreateFileW(
-        path.c_str(),
-        GENERIC_READ | GENERIC_WRITE,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        nullptr,
-        OPEN_ALWAYS,
-        FILE_ATTRIBUTE_NORMAL,
-        nullptr);
+    auto openLog = [&]()
+    {
+        return CreateFileW(
+            path.c_str(),
+            GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            nullptr,
+            OPEN_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL,
+            nullptr);
+    };
 
+    HANDLE file = openLog();
     if (file == INVALID_HANDLE_VALUE)
         return;
 
     LARGE_INTEGER size{};
     if (GetFileSizeEx(file, &size) != FALSE && size.QuadPart > kMaxLogBytes)
     {
-        LARGE_INTEGER zero{};
-        SetFilePointerEx(file, zero, nullptr, FILE_BEGIN);
-        SetEndOfFile(file);
+        CloseHandle(file);
+        const std::wstring rotated = path + L".1";
+        DeleteFileW(rotated.c_str());
+        MoveFileExW(path.c_str(), rotated.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+        file = openLog();
+        if (file == INVALID_HANDLE_VALUE)
+            return;
     }
 
     LARGE_INTEGER zero{};
@@ -1140,7 +1152,7 @@ DWORD WINAPI RpcThread(LPVOID)
         static_cast<std::int64_t>(std::time(nullptr));
 
     Trace(std::string("AzimuthRPC ") + kVersion + " FH2ML native worker started");
-    Trace("Log file: AzimuthRPC.log beside the Azimuth executable");
+    Trace("Log file: %LOCALAPPDATA%\\AzimuthRPC\\logs\\AzimuthRPC.log");
     LogLoadedModules();
 
     while (!g_stop.load(std::memory_order_relaxed))
@@ -1235,10 +1247,8 @@ DWORD WINAPI RpcThread(LPVOID)
 
 extern "C" __declspec(dllexport) int FH2ML_Initialize(const void* api)
 {
-    // The supplied FH2ML example proves the initializer receives a host-API
-    // pointer. This mod deliberately treats it as opaque until FH2ML.h is
-    // available in this repository, so it cannot accidentally bind to an
-    // invented struct layout. Runtime work happens on our own worker thread.
+    // FH2ML ABI v1 has no hot-unload contract. Initialization must not wait for
+    // worker threads, and DllMain must remain non-blocking for process teardown.
     (void)api;
 
     bool expected = false;
@@ -1268,6 +1278,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
     }
     else if (reason == DLL_PROCESS_DETACH)
     {
+        // Signal only. Waiting here would run under the Windows loader lock.
         g_stop.store(true, std::memory_order_relaxed);
     }
 
