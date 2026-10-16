@@ -23,7 +23,7 @@
 - Approximate mainland location from player position.
 - Detection for Pause Menu, Photo Mode, World Map, Horizon Hub, Garage and Loading states.
 - Two ways to run it: a standalone Windows tray app or a native FH2ML mod.
-- Experimental Linux/Wine support for the standalone app through a bundled Discord IPC bridge.
+- Experimental Linux/Wine support for both standalone and FH2ML through a bundled Discord IPC bridge.
 - Automatic Discord reconnect and presence refresh.
 - Native diagnostic logging for compatibility and car-detection reports.
 - Source available for inspection, local builds and development under the project license.
@@ -59,7 +59,7 @@ The native mod runs inside Azimuth/FH2ML and talks directly to Discord IPC. Do n
 
 ### Linux / Wine
 
-Experimental Linux support is available for the **standalone EXE under Wine** while Discord runs natively on Linux. The bundled `AzimuthRPC.DiscordBridge` forwards Discord IPC over a loopback-only connection between Wine and Discord's Unix-domain socket.
+Experimental Linux support is available while Azimuth runs under Wine and Discord runs natively on Linux. The bundled `AzimuthRPC.DiscordBridge` forwards Discord IPC over a loopback-only connection between Wine and Discord's Unix-domain socket. Both the standalone EXE and the FH2ML DLL can use this bridge.
 
 See [linux/README.md](linux/README.md) for build and launch instructions.
 
@@ -69,7 +69,7 @@ AzimuthRPC currently targets **Forza Horizon 2 Xbox One 1.0.0.64** through Azimu
 
 Compatibility can vary with Azimuth and FH2ML versions or other mods. If something breaks, include your exact setup in the issue report.
 
-Linux/Wine support is currently experimental and covers the standalone runtime. Direct bundled-bridge support for the FH2ML DLL is still follow-up work.
+Linux/Wine support is currently experimental. It uses Wine for Azimuth/FH2 and a native Linux helper to reach Discord's Unix-domain IPC socket; it is not a fully native Linux game-memory reader.
 
 ## Diagnostics & privacy
 
