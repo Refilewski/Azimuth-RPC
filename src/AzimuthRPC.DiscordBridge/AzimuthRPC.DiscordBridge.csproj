@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>AzimuthRPC.DiscordBridge</AssemblyName>
+    <Product>AzimuthRPC Discord Bridge</Product>
+    <Description>Loopback TCP to Discord Unix-domain IPC bridge for AzimuthRPC under Wine.</Description>
+  </PropertyGroup>
+</Project>
