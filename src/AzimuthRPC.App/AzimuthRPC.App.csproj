@@ -4,6 +4,7 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationIcon>../AzimuthRPC.Debug/Assets/AzimuthRPC.ico</ApplicationIcon>
     <AssemblyName>AzimuthRPC</AssemblyName>
     <Product>AzimuthRPC</Product>
     <Description>Discord Rich Presence for Forza Horizon 2 via Azimuth</Description>
