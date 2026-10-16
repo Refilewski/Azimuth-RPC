@@ -144,13 +144,22 @@ jobs:
           VERSION: ${{ needs.build.outputs.version }}
         run: |
           $tag = "v$env:VERSION"
-          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
-          if ($LASTEXITCODE -eq 0) {
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          $uri = "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/releases/tags/$tag"
+          $response = Invoke-WebRequest -Uri $uri -Headers $headers -SkipHttpErrorCheck
+
+          if ($response.StatusCode -eq 200) {
             "exists=true" >> $env:GITHUB_OUTPUT
             Write-Host "Release $tag already exists; nothing to publish."
-          } else {
+          } elseif ($response.StatusCode -eq 404) {
             "exists=false" >> $env:GITHUB_OUTPUT
             Write-Host "Release $tag does not exist yet; it will be published."
+          } else {
+            throw "Failed to check release $tag. GitHub API returned HTTP $($response.StatusCode)."
           }
 
       - name: Download standalone EXE
