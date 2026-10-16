@@ -47,6 +47,7 @@ jobs:
         run: |
           ./scripts/audit-public-tree.ps1
           ./tests/public-history-tests.ps1
+          ./tests/native-fh2ml-api-contract.ps1
 
       - name: Read and validate versions
         id: meta
