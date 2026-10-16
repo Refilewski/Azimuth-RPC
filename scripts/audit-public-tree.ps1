@@ -6,6 +6,7 @@ $files = @(& git.exe -c "safe.directory=$root" -C $root ls-files)
 if ($LASTEXITCODE -ne 0) { throw 'Cannot enumerate tracked repository files' }
 $issues = [Collections.Generic.List[string]]::new()
 $approvedBinaryFiles = @(
+    'src/AzimuthRPC.App/Assets/AzimuthRPC.ico',
     'src/AzimuthRPC.Debug/Assets/AzimuthRPC.ico'
 )
 foreach ($file in $files) {
