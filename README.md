@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="src/AzimuthRPC.Debug/Assets/AzimuthRPC.ico" alt="AzimuthRPC" width="128" />
+  <img src="docs/AzimuthRPC.svg" alt="AzimuthRPC" width="128" />
 </p>
 
 <h1 align="center">AzimuthRPC</h1>
