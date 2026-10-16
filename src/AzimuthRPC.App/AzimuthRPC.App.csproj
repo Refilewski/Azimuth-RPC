@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>AzimuthRPC</AssemblyName>
+    <Product>AzimuthRPC</Product>
+    <Description>Discord Rich Presence for Forza Horizon 2 via Azimuth</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../AzimuthRPC.Core/AzimuthRPC.Core.csproj"/>
+    <Compile Include="../AzimuthRPC.Debug/DebugRuntime.cs" Link="RuntimeHost.cs" />
+    <Compile Include="../AzimuthRPC.Debug/Native/ExternalProcessMemoryReader.cs" Link="Native/ExternalProcessMemoryReader.cs" />
+    <Compile Include="../AzimuthRPC.Debug/Native/Fh2TelemetryHook.cs" Link="Native/Fh2TelemetryHook.cs" />
+    <Compile Include="../AzimuthRPC.Debug/Native/X64TelemetryStubs.cs" Link="Native/X64TelemetryStubs.cs" />
+  </ItemGroup>
+</Project>

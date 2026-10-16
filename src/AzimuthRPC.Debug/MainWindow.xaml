@@ -1,0 +1,25 @@
+<Window x:Class="AzimuthRPC.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="AzimuthRPC Debug" Width="850" Height="780" MinWidth="650" MinHeight="600"
+        SourceInitialized="RoadTripHotkey_SourceInitialized" Closed="RoadTripHotkey_Closed">
+  <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="14">
+    <TextBlock Text="AzimuthRPC · Forza Horizon 2 Rich Presence" FontSize="19" FontWeight="Bold"/>
+    <TextBlock x:Name="StatusText" Margin="0,6" TextWrapping="Wrap"/>
+    <CheckBox x:Name="TopmostCheck" Content="Always on top / Zawsze na wierzchu" Click="Topmost_Click"/>
+    <TextBlock Text="GAME" FontWeight="Bold" Margin="0,12,0,4"/>
+    <TextBlock x:Name="GameText" FontFamily="Consolas" TextWrapping="Wrap"/>
+    <TextBlock Text="TELEMETRY" FontWeight="Bold" Margin="0,12,0,4"/>
+    <TextBlock x:Name="TelemetryText" FontFamily="Consolas" TextWrapping="Wrap"/>
+    <TextBlock Text="STATE" FontWeight="Bold" Margin="0,12,0,4"/>
+    <TextBlock x:Name="StateText" FontFamily="Consolas" TextWrapping="Wrap"/>
+    <TextBlock Text="HOOKS" FontWeight="Bold" Margin="0,12,0,4"/>
+    <TextBlock x:Name="HooksText" FontFamily="Consolas" TextWrapping="Wrap"/>
+    <TextBlock Text="DISCORD" FontWeight="Bold" Margin="0,12,0,4"/>
+    <TextBlock x:Name="DiscordText" FontFamily="Consolas" TextWrapping="Wrap"/>
+    <TextBox x:Name="ApplicationIdBox" ToolTip="Your Discord Application ID" Margin="0,6"/>
+    <WrapPanel><CheckBox x:Name="SpeedCheck" Content="Speed in presence"/><CheckBox x:Name="TrayCheck" Content="Close to tray" Margin="14,0"/><CheckBox x:Name="StartupCheck" Content="Windows startup"/><CheckBox x:Name="MinimizedCheck" Content="Launch minimized" Margin="14,0"/></WrapPanel>
+    <TextBlock Text="ADVANCED / DEBUG" FontWeight="Bold" Margin="0,12,0,4"/>
+    <TextBox x:Name="RawText" FontFamily="Consolas" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" MinHeight="70"/>
+    <WrapPanel Margin="0,10"><Button Content="Save settings" Click="Save_Click"/><Button Content="Copy debug state" Click="Copy_Click" Margin="8,0"/><Button Content="Full dump (F8)" Click="Dump_Click"/><Button Content="Native location (F9)" Click="NativeLocationDump_Click" Margin="8,0"/><Button Content="Location XREFs (F10)" Click="LocationXrefDump_Click"/><Button Content="RoadTrip lookup (F11)" Click="RoadTripLookupDump_Click" Margin="8,0"/><Button Content="Current hub chain (F12)" Click="CurrentHubChainDump_Click"/><Button Content="Trigger zones (F13)" Click="TriggerZoneDump_Click" Margin="8,0"/><Button Content="Exit" Click="Exit_Click"/></WrapPanel>
+    <TextBlock x:Name="MessageText" TextWrapping="Wrap"/>
+  </StackPanel></ScrollViewer>
+</Window>

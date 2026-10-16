@@ -1,0 +1,13 @@
+{
+  "id": "azimuth-rpc",
+  "name": "AzimuthRPC",
+  "version": "0.9.1",
+  "author": "Refilewski",
+  "entry": "AzimuthRPC.dll",
+  "enabled": true,
+  "priority": 500,
+  "dependencies": [],
+  "conflicts": [],
+  "loadAfter": [],
+  "loadBefore": []
+}

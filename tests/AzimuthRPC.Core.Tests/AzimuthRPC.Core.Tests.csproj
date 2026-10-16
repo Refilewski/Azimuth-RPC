@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework></PropertyGroup>
+  <ItemGroup>
+    <None Update="baseline-regression.json" CopyToOutputDirectory="PreserveNewest" />
+    <ProjectReference Include="../../src/AzimuthRPC.Core/AzimuthRPC.Core.csproj" />
+    <ProjectReference Include="../../src/AzimuthRPC.InProcess/AzimuthRPC.InProcess.csproj" />
+    <Compile Include="../../src/AzimuthRPC.Debug/Native/X64TelemetryStubs.cs" Link="X64TelemetryStubs.cs" />
+    <Compile Include="../SyntheticFixtures.cs" Link="SyntheticFixtures.cs" />
+    <None Include="../fixtures/synthetic/*.json" Link="Fixtures/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

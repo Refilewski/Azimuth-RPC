@@ -1,0 +1,75 @@
+name: Bug report
+description: Report an AzimuthRPC runtime or car-detection problem
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Logs can contain module filenames, memory probe values and runtime telemetry.
+        Review/redact personal information before uploading. Do not attach raw memory dumps or game assets.
+  - type: input
+    id: azimuth
+    attributes:
+      label: Azimuth version
+    validations:
+      required: true
+  - type: input
+    id: fh2
+    attributes:
+      label: Forza Horizon 2 version/build
+    validations:
+      required: true
+  - type: input
+    id: rpc
+    attributes:
+      label: AzimuthRPC version
+    validations:
+      required: true
+  - type: dropdown
+    id: runtime
+    attributes:
+      label: Runtime
+      options:
+        - Standalone AzimuthRPC.exe
+        - Native FH2ML AzimuthRPC.dll
+    validations:
+      required: true
+  - type: input
+    id: fh2ml
+    attributes:
+      label: FH2ML version (if used)
+  - type: input
+    id: extra
+    attributes:
+      label: Extra Options version (if installed)
+  - type: textarea
+    id: mods
+    attributes:
+      label: Other installed mods
+  - type: input
+    id: car
+    attributes:
+      label: Exact current car
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps and where in game it happens
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Reviewed AzimuthRPC.log
+      description: Attach the reviewed log, especially Car probe entries for missing-car reports. Redact personal information first.

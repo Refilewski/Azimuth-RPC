@@ -1,0 +1,46 @@
+AzimuthRPC Use-Only License 1.0
+
+Copyright (c) 2026 Refilewski. All rights reserved except as expressly granted below.
+
+1. Scope
+This license applies to the AzimuthRPC code and documentation only to the extent
+that Refilewski controls the applicable rights. It does not license Forza Horizon 2,
+Azimuth, Discord, operating-system components, frameworks or third-party material.
+Their owners' rights, applicable notices and separate licenses remain unchanged.
+
+2. Permitted use
+You may obtain, inspect, install, compile and run AzimuthRPC for your own lawful
+use, without a fee. You may make the local copies and backups reasonably necessary
+for those activities and change documented configuration settings. Keep this
+license and applicable notices with copies made under this permission.
+
+3. Reserved rights
+Except for section 2 and the exceptions below, no permission is granted to copy,
+republish, distribute, sell, sublicense or otherwise transfer the code or compiled
+program to others. No permission is granted to incorporate the code, in whole or
+in part, into another project, or to publish or distribute modified versions or
+derivative implementations of this code. Additional permission must be obtained
+in writing from Refilewski. Attribution alone does not grant those permissions.
+
+4. Hosting and legal exceptions
+Nothing here restricts rights that cannot lawfully be excluded or permissions
+already granted by a third-party rights holder. Where this repository is hosted
+publicly on GitHub, permissions required by GitHub's applicable Terms of Service,
+including viewing and forking through the service, are unaffected. Those hosting
+permissions do not grant a general right to reuse or redistribute the code under
+this license outside their scope. Technical availability is not an additional
+license grant.
+
+5. No warranty
+The program is provided as available, without a promise that it is accurate,
+compatible, secure, uninterrupted or suitable for a particular purpose. To the
+maximum extent allowed by law, the rights holder disclaims warranties and
+liability for losses resulting from obtaining or using it. Mandatory statutory
+rights are unaffected.
+
+6. Compliance
+The permissions in section 2 are conditional on compliance with this license.
+If you breach its conditions, those permissions end. Other rights and remedies
+available under applicable law are unaffected.
+
+This is a restrictive, source-available license. It is not an open-source license.

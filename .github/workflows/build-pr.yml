@@ -1,0 +1,174 @@
+name: CI & Release AzimuthRPC
+
+on:
+  pull_request:
+    branches:
+      - refactor/codex-cleanup
+      - main
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: azimuthrpc-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      mod_version: ${{ steps.meta.outputs.mod_version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Check public tree and history tooling
+        shell: pwsh
+        run: |
+          ./scripts/audit-public-tree.ps1
+          ./tests/public-history-tests.ps1
+
+      - name: Read and validate versions
+        id: meta
+        shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          [xml]$props = Get-Content 'Directory.Build.props'
+          $version = [string]$props.Project.PropertyGroup.Version
+          if ([string]::IsNullOrWhiteSpace($version)) { throw 'App version not found' }
+
+          $manifest = Get-Content 'native/FH2ML.AzimuthRPC/mod.json' -Raw | ConvertFrom-Json
+          $modVersion = [string]$manifest.version
+          if ([string]::IsNullOrWhiteSpace($modVersion)) { throw 'Native mod version not found' }
+
+          if ($version -ne $modVersion) {
+            throw "Standalone version $version does not match native mod version $modVersion"
+          }
+
+          if ($env:EVENT_NAME -eq 'push') {
+            $expectedTag = "v$version"
+            if ($env:REF_NAME -ne $expectedTag) {
+              throw "Tag $($env:REF_NAME) does not match Directory.Build.props version $expectedTag"
+            }
+          }
+
+          "VERSION=$version" >> $env:GITHUB_ENV
+          "ARTIFACT_DIR=artifacts/AzimuthRPC-$version-win-x64" >> $env:GITHUB_ENV
+          "MOD_VERSION=$modVersion" >> $env:GITHUB_ENV
+          "MOD_ARTIFACT_DIR=artifacts/FH2ML-AzimuthRPC-$modVersion" >> $env:GITHUB_ENV
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "mod_version=$modVersion" >> $env:GITHUB_OUTPUT
+
+      - name: Build, test and smoke-test standalone
+        shell: pwsh
+        run: ./publish.ps1
+
+      - name: Build FH2ML DLL
+        shell: pwsh
+        run: ./native/FH2ML.AzimuthRPC/build.ps1
+
+      - name: Verify release outputs
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:ARTIFACT_DIR 'AzimuthRPC.exe'
+          $dll = Join-Path $env:MOD_ARTIFACT_DIR 'AzimuthRPC.dll'
+          $manifest = Join-Path $env:MOD_ARTIFACT_DIR 'mod.json'
+          if (-not (Test-Path $exe)) { throw "Missing $exe" }
+          if (-not (Test-Path $dll)) { throw "Missing $dll" }
+          if (-not (Test-Path $manifest)) { throw "Missing $manifest" }
+          foreach ($folder in @($env:ARTIFACT_DIR, $env:MOD_ARTIFACT_DIR)) {
+            $license = Join-Path $folder 'LICENSE'
+            if (-not (Test-Path $license)) { throw "Missing $license" }
+            if ((Get-FileHash $license).Hash -ne (Get-FileHash 'LICENSE').Hash) { throw "License mismatch: $license" }
+          }
+          Get-Item $exe,$dll | Format-Table Name,Length,LastWriteTime
+
+      - name: Upload standalone EXE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AzimuthRPC-${{ env.VERSION }}-win-x64
+          path: ${{ env.ARTIFACT_DIR }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload FH2ML DLL artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FH2ML-AzimuthRPC-${{ env.MOD_VERSION }}
+          path: ${{ env.MOD_ARTIFACT_DIR }}
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
+    runs-on: windows-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout release notes
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Download standalone EXE
+        uses: actions/download-artifact@v4
+        with:
+          name: AzimuthRPC-${{ needs.build.outputs.version }}-win-x64
+          path: release/standalone
+
+      - name: Download FH2ML package
+        uses: actions/download-artifact@v4
+        with:
+          name: FH2ML-AzimuthRPC-${{ needs.build.outputs.mod_version }}
+          path: release/fh2ml
+
+      - name: Package FH2ML ZIP
+        shell: pwsh
+        run: |
+          $zip = "release/FH2ML-AzimuthRPC-${{ needs.build.outputs.mod_version }}.zip"
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path 'release/fh2ml/*' -DestinationPath $zip -CompressionLevel Optimal
+          if (-not (Test-Path $zip)) { throw "Missing $zip" }
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+          MOD_VERSION: ${{ needs.build.outputs.mod_version }}
+        run: |
+          $tag = "v$env:VERSION"
+          $exe = 'release/standalone/AzimuthRPC.exe'
+          $dll = 'release/fh2ml/AzimuthRPC.dll'
+          $zip = "release/FH2ML-AzimuthRPC-$env:MOD_VERSION.zip"
+          $license = 'release/standalone/LICENSE'
+
+          if (gh release view $tag --repo $env:GITHUB_REPOSITORY 2>$null) {
+            gh release upload $tag $exe $dll $zip $license --clobber --repo $env:GITHUB_REPOSITORY
+          } else {
+            gh release create $tag $exe $dll $zip $license `
+              --repo $env:GITHUB_REPOSITORY `
+              --target $env:GITHUB_SHA `
+              --title "AzimuthRPC $tag" `
+              --notes-file RELEASE_NOTES.md
+          }

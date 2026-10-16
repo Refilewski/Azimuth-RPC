@@ -1,0 +1,1 @@
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup><ItemGroup><InternalsVisibleTo Include="AzimuthRPC"/><InternalsVisibleTo Include="AzimuthRPC.Debug"/><InternalsVisibleTo Include="FH2UiMode.Tests"/><InternalsVisibleTo Include="AzimuthRPC.Core.Tests"/><InternalsVisibleTo Include="AzimuthRPC.InProcess"/></ItemGroup></Project>

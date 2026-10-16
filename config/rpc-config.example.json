@@ -1,0 +1,11 @@
+{
+  "ApplicationId": "",
+  "ProcessName": "azimuth",
+  "GameExePath": "",
+  "Details": "Exploring Southern Europe",
+  "State": "Forza Horizon 2 via Azimuth",
+  "UseLiveCarInPresence": true,
+  "UseLiveSpeedInPresence": true,
+  "AlwaysOnTop": false,
+  "RunOnStartup": false
+}

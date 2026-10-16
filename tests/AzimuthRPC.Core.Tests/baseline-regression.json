@@ -1,0 +1,32 @@
+{
+  "Provenance": "Historical regression expectations; synthetic memory constructed by tests/SyntheticFixtures.cs. No raw captured bytes. Stub opcode checks are local non-executing regression controls.",
+  "Modes": {
+    "event_moving_1": "Unknown",
+    "roadtrip_stopped_1": "Unknown",
+    "roadtrip_moving_1": "Unknown",
+    "photomode_1": "PhotoMode",
+    "pause_1": "PauseMenu",
+    "photomode_2": "PhotoMode",
+    "roadtrip_normal_2": "Unknown",
+    "UNLABELED_NEW_1": "WorldMap",
+    "UNLABELED_NEW_2": "Unknown",
+    "UNLABELED_NEW_3": "Unknown",
+    "UNLABELED_NEW_4": "Unknown",
+    "UNLABELED_NEW_5": "Unknown",
+    "event_sprint_2": "Unknown",
+    "worldmap_1": "WorldMap",
+    "pause_2": "PauseMenu",
+    "photomode_3": "PhotoMode",
+    "worldmap_2": "WorldMap",
+    "gameplay_driving_1": "Unknown",
+    "free-roam-stopped": "Unknown",
+    "garage": "Garage",
+    "horizon-hub": "HorizonHub",
+    "race-loading": "Loading"
+  },
+  "StubInputTelemetry": "0x123456789000",
+  "StubInputTarget": "0x18000000C",
+  "Jump": "48B80C00008001000000FFE0",
+  "Rpm": "49BA009078563412000041FF4204F3410F1000F3410F1102F3410F104004F3410F114208410FB640314188420C410FB640324188420D41FF42040FB641062C023C01410F96C149BB0C0000800100000041FFE3",
+  "Event": "4883EC3848894C242049BB0C0000800100000041FFD3488944242849BA009078563412000041FF4214488B4424208B40604189421041FF4214488B4424284883C438C3"
+}
