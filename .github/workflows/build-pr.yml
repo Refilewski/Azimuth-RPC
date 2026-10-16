@@ -8,8 +8,6 @@ on:
   push:
     branches:
       - main
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
       publish_release:
@@ -53,10 +51,6 @@ jobs:
       - name: Read and validate versions
         id: meta
         shell: pwsh
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          REF_NAME: ${{ github.ref_name }}
-          REF_TYPE: ${{ github.ref_type }}
         run: |
           [xml]$props = Get-Content 'Directory.Build.props'
           $version = [string]$props.Project.PropertyGroup.Version
@@ -74,13 +68,6 @@ jobs:
           $expectedNotesHeading = "# AzimuthRPC v$version"
           if ($notesHeading -ne $expectedNotesHeading) {
             throw "RELEASE_NOTES.md heading '$notesHeading' does not match '$expectedNotesHeading'"
-          }
-
-          if ($env:EVENT_NAME -eq 'push' -and $env:REF_TYPE -eq 'tag') {
-            $expectedTag = "v$version"
-            if ($env:REF_NAME -ne $expectedTag) {
-              throw "Tag $($env:REF_NAME) does not match Directory.Build.props version $expectedTag"
-            }
           }
 
           "VERSION=$version" >> $env:GITHUB_ENV
@@ -134,7 +121,6 @@ jobs:
     needs: build
     if: >-
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
       (github.event_name == 'workflow_dispatch' && inputs.publish_release == true)
     runs-on: windows-latest
     timeout-minutes: 10
@@ -200,9 +186,6 @@ jobs:
           $dll = 'release/fh2ml/AzimuthRPC.dll'
           $zip = "release/FH2ML-AzimuthRPC-$env:MOD_VERSION.zip"
           $license = 'release/standalone/LICENSE'
-
-          git tag $tag $env:GITHUB_SHA
-          git push origin $tag
 
           gh release create $tag $exe $dll $zip $license `
             --repo $env:GITHUB_REPOSITORY `
