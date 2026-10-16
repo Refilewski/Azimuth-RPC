@@ -1,20 +1,23 @@
-# AzimuthRPC v0.9.1
+# AzimuthRPC v0.9.3
 
-Small diagnostics and Rich Presence cleanup release.
+Diagnostics, Rich Presence and release packaging cleanup release.
 
-- Native FH2ML build now writes `AzimuthRPC.log` beside the Azimuth executable.
-- The log records the AzimuthRPC version, detected FH2 base, Discord IPC connection state, loaded module names and Rich Presence updates.
-- Car detection now logs the `AudioEngine + 0x278` probe result, parser reason, raw ASCII and 64 raw bytes in hex whenever that probe changes. This is intended to diagnose reports where RPC works but the current car is missing.
-- Empty fallback state text is no longer sent to Discord. Screens such as Horizon Hub therefore do not show a redundant second line like `Forza Horizon 2 via AzimuthRPC` when no useful car/state value is available.
-- Standalone and FH2ML package versions remain aligned at 0.9.1.
+- Standalone `AzimuthRPC.exe` now writes `AzimuthRPC.log` beside the executable when possible, with a `%LOCALAPPDATA%\AzimuthRPC\AzimuthRPC.log` fallback if the application directory is not writable.
+- The standalone log records the AzimuthRPC version, Azimuth process attachment state, FH2 mapping state, Discord IPC state, Rich Presence details/state and runtime errors.
+- Native FH2ML logging continues to record the detected FH2 base, Discord IPC connection state, loaded module names, Rich Presence updates and car-probe diagnostics.
+- Car detection diagnostics include the `AudioEngine + 0x278` probe result, parser reason, raw ASCII and 64 raw bytes in hex whenever that probe changes.
+- Empty fallback state text is not sent to Discord on screens where no useful state value is available.
+- Standalone and FH2ML package versions are aligned at 0.9.3.
 
 ## Supported game build
 
 Forza Horizon 2 Xbox One build 1.0.0.64 via Azimuth.
 
-## Reporting car-detection issues
+## Reporting issues
 
-If Rich Presence works but the car is missing, reproduce the issue in-game and attach `AzimuthRPC.log` from the Azimuth directory. The useful line begins with `Car probe:` and includes the parser result plus the raw bytes around the current car field.
+For standalone issues, reproduce the problem and attach `AzimuthRPC.log` from beside `AzimuthRPC.exe`. If that folder is not writable, check `%LOCALAPPDATA%\AzimuthRPC\AzimuthRPC.log`.
+
+For FH2ML car-detection issues, attach the native `AzimuthRPC.log`; useful lines begin with `Car probe:` and include the parser result plus the raw bytes around the current car field.
 
 ## Known limitations
 
