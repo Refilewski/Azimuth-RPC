@@ -1,4 +1,5 @@
 #include <windows.h>
+#include "FH2ML.h"
 #include "LocationResolver.h"
 #include <tlhelp32.h>
 
@@ -17,7 +18,7 @@
 
 namespace
 {
-constexpr std::uintptr_t kPreferredGameBase = 0x140000000ull;
+
 constexpr std::uint32_t kExpectedTimestamp = 0x565501EDu;
 constexpr std::uint32_t kExpectedImageSize = 0x03A18000u;
 constexpr std::uint32_t kExpectedEntryRva = 0x00F18058u;
@@ -40,13 +41,14 @@ constexpr std::uintptr_t kSimulationManagerVtableRva = 0x02C5FD70ull;
 constexpr std::size_t kCarIdOffset = 0x278;
 constexpr std::size_t kCarIdBytes = 64;
 constexpr char kDiscordApplicationId[] = "1445162899315363924";
-constexpr char kVersion[] = "0.9.5";
+constexpr char kVersion[] = "0.9.6";
 constexpr DWORD kDiscordReconnectMs = 5000;
 constexpr DWORD kPresenceUpdateMs = 4000;
 constexpr LONGLONG kMaxLogBytes = 2ll * 1024ll * 1024ll;
 
 std::atomic<bool> g_started{false};
 std::atomic<bool> g_stop{false};
+const FH2ML_HostAPI* g_hostApi = nullptr;
 
 struct Vec3
 {
@@ -172,6 +174,9 @@ void Trace(const std::string& message)
     const std::string debug = "[AzimuthRPC] " + message + "\n";
     OutputDebugStringA(debug.c_str());
     AppendLog(message);
+
+    if (g_hostApi != nullptr && g_hostApi->Log != nullptr)
+        g_hostApi->Log("azimuth-rpc", message.c_str());
 }
 
 std::string WideToUtf8(const wchar_t* value)
@@ -272,47 +277,13 @@ bool IsSupportedGameImage(const std::uintptr_t base)
            nt.OptionalHeader.AddressOfEntryPoint == kExpectedEntryRva;
 }
 
-std::uintptr_t FindGameBase()
+std::uintptr_t GetGameBaseFromHost()
 {
-    if (IsSupportedGameImage(kPreferredGameBase))
-        return kPreferredGameBase;
+    if (g_hostApi == nullptr || g_hostApi->GetGameModule == nullptr)
+        return 0;
 
-    SYSTEM_INFO info{};
-    GetSystemInfo(&info);
-
-    std::uintptr_t address =
-        reinterpret_cast<std::uintptr_t>(info.lpMinimumApplicationAddress);
-    const std::uintptr_t maximum =
-        reinterpret_cast<std::uintptr_t>(info.lpMaximumApplicationAddress);
-
-    while (address < maximum && !g_stop.load(std::memory_order_relaxed))
-    {
-        MEMORY_BASIC_INFORMATION mbi{};
-        if (VirtualQuery(reinterpret_cast<LPCVOID>(address), &mbi, sizeof(mbi)) == 0)
-            break;
-
-        const auto regionBase = reinterpret_cast<std::uintptr_t>(mbi.BaseAddress);
-        const auto allocationBase = reinterpret_cast<std::uintptr_t>(mbi.AllocationBase);
-
-        if (mbi.State == MEM_COMMIT &&
-            allocationBase == regionBase &&
-            (mbi.Protect & PAGE_GUARD) == 0 &&
-            (mbi.Protect & PAGE_NOACCESS) == 0 &&
-            IsSupportedGameImage(regionBase))
-        {
-            return regionBase;
-        }
-
-        if (mbi.RegionSize == 0)
-            break;
-
-        const std::uintptr_t next = regionBase + mbi.RegionSize;
-        if (next <= address)
-            break;
-        address = next;
-    }
-
-    return 0;
+    const std::uintptr_t base = g_hostApi->GetGameModule();
+    return IsSupportedGameImage(base) ? base : 0;
 }
 
 std::int32_t ReadI32(const std::uint8_t* data, const std::size_t offset)
@@ -1159,7 +1130,7 @@ DWORD WINAPI RpcThread(LPVOID)
     {
         if (gameBase == 0 || !IsSupportedGameImage(gameBase))
         {
-            gameBase = FindGameBase();
+            gameBase = GetGameBaseFromHost();
             if (gameBase == 0)
             {
                 Sleep(1000);
@@ -1170,7 +1141,7 @@ DWORD WINAPI RpcThread(LPVOID)
             std::snprintf(
                 message,
                 sizeof(message),
-                "FH2 mapped image found at 0x%llX",
+                "FH2ML game module acquired at 0x%llX",
                 static_cast<unsigned long long>(gameBase));
             Trace(message);
         }
@@ -1245,11 +1216,20 @@ DWORD WINAPI RpcThread(LPVOID)
 }
 } // namespace
 
-extern "C" __declspec(dllexport) int FH2ML_Initialize(const void* api)
+extern "C" __declspec(dllexport) int FH2ML_Initialize(const FH2ML_HostAPI* api)
 {
-    // FH2ML ABI v1 has no hot-unload contract. Initialization must not wait for
-    // worker threads, and DllMain must remain non-blocking for process teardown.
-    (void)api;
+    // FH2ML ABI v1 has no hot-unload contract. Validate the complete v1 host
+    // table up front, register this mod, then hand the worker the host-owned
+    // mapped FH2 module instead of scanning the process address space.
+    if (api == nullptr ||
+        api->size < sizeof(FH2ML_HostAPI) ||
+        api->version != FH2ML_API_VERSION ||
+        api->Log == nullptr ||
+        api->RegisterMod == nullptr ||
+        api->GetGameModule == nullptr)
+    {
+        return 0;
+    }
 
     bool expected = false;
     if (!g_started.compare_exchange_strong(expected, true))
@@ -1257,9 +1237,37 @@ extern "C" __declspec(dllexport) int FH2ML_Initialize(const void* api)
 
     g_stop.store(false, std::memory_order_relaxed);
 
+    if (api->RegisterMod("azimuth-rpc", kVersion) == 0)
+    {
+        api->Log("azimuth-rpc", "FH2ML RegisterMod rejected AzimuthRPC");
+        g_started.store(false, std::memory_order_relaxed);
+        return 0;
+    }
+
+    g_hostApi = api;
+    const std::uintptr_t gameBase = GetGameBaseFromHost();
+    if (gameBase == 0)
+    {
+        api->Log("azimuth-rpc", "FH2ML GetGameModule returned no supported FH2 1.0.0.64 image");
+        g_hostApi = nullptr;
+        g_started.store(false, std::memory_order_relaxed);
+        return 0;
+    }
+
+    char registration[160]{};
+    std::snprintf(
+        registration,
+        sizeof(registration),
+        "Registered with FH2ML API v%u; game module=0x%llX",
+        static_cast<unsigned int>(api->version),
+        static_cast<unsigned long long>(gameBase));
+    Trace(registration);
+
     HANDLE thread = CreateThread(nullptr, 0, RpcThread, nullptr, 0, nullptr);
     if (thread == nullptr)
     {
+        Trace("Failed to start FH2ML native RPC worker");
+        g_hostApi = nullptr;
         g_started.store(false, std::memory_order_relaxed);
         return 0;
     }

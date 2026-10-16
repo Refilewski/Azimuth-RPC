@@ -91,3 +91,12 @@ AzimuthRPC omits Discord's second `state` line when it has no useful value to sh
 - The current location names are macro regions inferred from player coordinates, not a native FH2 road/landmark source.
 - Discord IPC is retried automatically if Discord is not running or restarts.
 - No hot-unload support is attempted.
+## FH2ML Host API integration
+
+The native DLL is built against the vendored FH2ML SDK v1 header in `fh2ml-sdk/`.
+During `FH2ML_Initialize` it validates the host table, registers `azimuth-rpc`,
+mirrors diagnostics through the FH2ML logger, and obtains the mapped FH2 image
+from `GetGameModule()`. It does not scan the process address space for the game.
+
+The vendored FH2ML SDK header is licensed separately under MIT; see
+`fh2ml-sdk/LICENSE`.
