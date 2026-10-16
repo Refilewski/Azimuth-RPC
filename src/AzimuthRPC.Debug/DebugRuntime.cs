@@ -8,6 +8,7 @@ internal sealed record DebugStatus(GameSnapshot Game, string Process, string Map
 
 internal sealed class DebugRuntime : IAsyncDisposable
 {
+    private static readonly TimeSpan PresenceMinInterval = TimeSpan.FromSeconds(4);
     private AppConfig _options;
     private readonly CancellationTokenSource _stop = new();
     private Task? _loop;
@@ -19,6 +20,7 @@ internal sealed class DebugRuntime : IAsyncDisposable
     private ulong _base;
     private DateTime _started;
     private DateTime _nextAttach, _nextMemory, _nextHook, _nextDiscord;
+    private DateTime _lastPresenceSentUtc = DateTime.MinValue;
     private GameSnapshot _memorySnapshot = GameSnapshot.Unavailable("Waiting for Azimuth");
     private DiscordIpcClient? _discord;
     private string? _sentFingerprint;
@@ -91,15 +93,18 @@ internal sealed class DebugRuntime : IAsyncDisposable
             _nextDiscord = now.AddSeconds(5); var client = new DiscordIpcClient(options.ApplicationId);
             try
             {
-                if (await client.ConnectAsync(token)) { _discord = client; _discordApplicationId = options.ApplicationId; _sentFingerprint = null; _discordStatus = "Connected"; }
+                if (await client.ConnectAsync(token)) { _discord = client; _discordApplicationId = options.ApplicationId; _sentFingerprint = null; _lastPresenceSentUtc = DateTime.MinValue; _discordStatus = "Connected"; }
                 else { await client.DisposeAsync(); _discordStatus = "Discord not detected"; }
             }
             catch { await client.DisposeAsync(); throw; }
         }
-        if (_discord?.IsConnected == true && _sentFingerprint != presence.Fingerprint)
+        if (_discord?.IsConnected == true &&
+            _sentFingerprint != presence.Fingerprint &&
+            now - _lastPresenceSentUtc >= PresenceMinInterval)
         {
             await _discord.SetActivityAsync(presence.Options, presence.SessionStartUtc, presence.Details, presence.State, token);
             _sentFingerprint = presence.Fingerprint;
+            _lastPresenceSentUtc = now;
         }
         if (string.IsNullOrWhiteSpace(options.ApplicationId)) _discordStatus = "Set Discord Application ID";
         Publish(snapshot, presence);
@@ -123,7 +128,7 @@ internal sealed class DebugRuntime : IAsyncDisposable
         }
         await DisconnectAsync();
     }
-    private async Task DisconnectAsync() { if (_discord is not null) await _discord.DisposeAsync(); _discord = null; _discordApplicationId = null; _sentFingerprint = null; _discordStatus = "Disconnected"; _nextDiscord = DateTime.MinValue; }
+    private async Task DisconnectAsync() { if (_discord is not null) await _discord.DisposeAsync(); _discord = null; _discordApplicationId = null; _sentFingerprint = null; _lastPresenceSentUtc = DateTime.MinValue; _discordStatus = "Disconnected"; _nextDiscord = DateTime.MinValue; }
     private static bool Exited(Process p) { try { return p.HasExited; } catch { return true; } }
     private static Process? FindProcess(string name)
     {
