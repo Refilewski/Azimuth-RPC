@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.IO;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -15,10 +16,26 @@ internal static class Program
         if (!firstInstance)
             return;
 
+        using var log = FileLog.Open();
         bool smokeTest = args.Contains("--smoke-test", StringComparer.OrdinalIgnoreCase);
-        var config = new AppConfig { Offline = smokeTest };
-        using var context = new TrayApplicationContext(config, smokeTest);
-        Application.Run(context);
+        log.Write($"AzimuthRPC {VersionInfo.Version} standalone started{(smokeTest ? " (smoke test)" : string.Empty)}");
+        log.Write($"Log file: {log.Path}");
+
+        try
+        {
+            var config = new AppConfig { Offline = smokeTest };
+            using var context = new TrayApplicationContext(config, smokeTest, log);
+            Application.Run(context);
+        }
+        catch (Exception e)
+        {
+            log.Write($"Fatal error: {e}");
+            throw;
+        }
+        finally
+        {
+            log.Write("AzimuthRPC standalone stopped");
+        }
     }
 }
 
@@ -29,10 +46,13 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly System.Windows.Forms.Timer _statusTimer;
     private readonly System.Windows.Forms.Timer? _smokeTimer;
     private readonly DebugRuntime _runtime;
+    private readonly FileLog _log;
+    private string? _lastLoggedStatus;
     private int _exiting;
 
-    internal TrayApplicationContext(AppConfig config, bool smokeTest)
+    internal TrayApplicationContext(AppConfig config, bool smokeTest, FileLog log)
     {
+        _log = log;
         Icon appIcon = Icon.ExtractAssociatedIcon(Environment.ProcessPath ?? string.Empty) ?? SystemIcons.Application;
         _statusItem = new ToolStripMenuItem("Waiting for Azimuth") { Enabled = false };
 
@@ -51,6 +71,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
         };
 
         _runtime = new DebugRuntime(config);
+        _runtime.Log += OnRuntimeLog;
+        _runtime.Changed += OnRuntimeChanged;
         _runtime.Start();
 
         _statusTimer = new System.Windows.Forms.Timer { Interval = 1000 };
@@ -67,6 +89,19 @@ internal sealed class TrayApplicationContext : ApplicationContext
             };
             _smokeTimer.Start();
         }
+    }
+
+    private void OnRuntimeLog(string message) => _log.Write(message);
+
+    private void OnRuntimeChanged(DebugStatus status)
+    {
+        string state = string.IsNullOrWhiteSpace(status.Presence.State) ? "<omitted>" : status.Presence.State;
+        string next = $"Process={status.Process}; Mapping={status.Mapping}; Discord={status.Discord}; Details=\"{status.Presence.Details}\"; State=\"{state}\"";
+        if (string.Equals(next, _lastLoggedStatus, StringComparison.Ordinal))
+            return;
+
+        _lastLoggedStatus = next;
+        _log.Write(next);
     }
 
     private void RefreshStatus()
@@ -103,10 +138,75 @@ internal sealed class TrayApplicationContext : ApplicationContext
     {
         if (disposing)
         {
+            _runtime.Log -= OnRuntimeLog;
+            _runtime.Changed -= OnRuntimeChanged;
             _statusTimer.Dispose();
             _smokeTimer?.Dispose();
             _tray.Dispose();
         }
         base.Dispose(disposing);
+    }
+}
+
+internal sealed class FileLog : IDisposable
+{
+    private const long MaxBytes = 2L * 1024L * 1024L;
+    private readonly object _gate = new();
+    private readonly StreamWriter _writer;
+
+    private FileLog(string path, StreamWriter writer)
+    {
+        Path = path;
+        _writer = writer;
+    }
+
+    internal string Path { get; }
+
+    internal static FileLog Open()
+    {
+        string executable = Environment.ProcessPath ?? string.Empty;
+        string directory = Path.GetDirectoryName(executable) ?? AppContext.BaseDirectory;
+        string preferred = Path.Combine(directory, "AzimuthRPC.log");
+
+        try
+        {
+            return Create(preferred);
+        }
+        catch (Exception)
+        {
+            string fallbackDirectory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "AzimuthRPC");
+            Directory.CreateDirectory(fallbackDirectory);
+            return Create(Path.Combine(fallbackDirectory, "AzimuthRPC.log"));
+        }
+    }
+
+    private static FileLog Create(string path)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path) ?? AppContext.BaseDirectory);
+
+        if (File.Exists(path) && new FileInfo(path).Length > MaxBytes)
+            File.WriteAllText(path, string.Empty);
+
+        var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+        var writer = new StreamWriter(stream) { AutoFlush = true };
+        return new FileLog(path, writer);
+    }
+
+    internal void Write(string message)
+    {
+        lock (_gate)
+        {
+            _writer.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {message}");
+        }
+    }
+
+    public void Dispose()
+    {
+        lock (_gate)
+        {
+            _writer.Dispose();
+        }
     }
 }
