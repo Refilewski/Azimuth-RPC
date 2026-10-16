@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">AzimuthRPC logo</title>
+  <desc id="desc">White A over a purple diagonal stripe on a dark background.</desc>
+  <rect width="256" height="256" rx="18" fill="#19191d"/>
+  <path d="M-18 191 274 88v36L-18 227z" fill="#7135ff"/>
+  <path d="M52 194 116 41l24 7-64 157z" fill="#f5f5f5"/>
+  <path d="M116 41 140 48l64 145-23 10z" fill="#f5f5f5"/>
+  <path d="M91 137h70l10 22H82z" fill="#f5f5f5"/>
+</svg>

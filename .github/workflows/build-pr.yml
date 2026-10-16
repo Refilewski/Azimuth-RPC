@@ -70,6 +70,12 @@ jobs:
             throw "Standalone version $version does not match native mod version $modVersion"
           }
 
+          $notesHeading = (Get-Content 'RELEASE_NOTES.md' -TotalCount 1).Trim()
+          $expectedNotesHeading = "# AzimuthRPC v$version"
+          if ($notesHeading -ne $expectedNotesHeading) {
+            throw "RELEASE_NOTES.md heading '$notesHeading' does not match '$expectedNotesHeading'"
+          }
+
           if ($env:EVENT_NAME -eq 'push' -and $env:REF_TYPE -eq 'tag') {
             $expectedTag = "v$version"
             if ($env:REF_NAME -ne $expectedTag) {
@@ -175,6 +181,10 @@ jobs:
 
           if (gh release view $tag --repo $env:GITHUB_REPOSITORY 2>$null) {
             gh release upload $tag $exe $dll $zip $license --clobber --repo $env:GITHUB_REPOSITORY
+            gh release edit $tag `
+              --repo $env:GITHUB_REPOSITORY `
+              --title "AzimuthRPC $tag" `
+              --notes-file RELEASE_NOTES.md
           } else {
             gh release create $tag $exe $dll $zip $license `
               --repo $env:GITHUB_REPOSITORY `
