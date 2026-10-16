@@ -164,22 +164,10 @@ internal sealed class FileLog : IDisposable
 
     internal static FileLog Open()
     {
-        string executable = Environment.ProcessPath ?? string.Empty;
-        string directory = Path.GetDirectoryName(executable) ?? AppContext.BaseDirectory;
-        string preferred = Path.Combine(directory, "AzimuthRPC.log");
-
-        try
-        {
-            return Create(preferred);
-        }
-        catch (Exception)
-        {
-            string fallbackDirectory = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "AzimuthRPC");
-            Directory.CreateDirectory(fallbackDirectory);
-            return Create(Path.Combine(fallbackDirectory, "AzimuthRPC.log"));
-        }
+        string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        string directory = Path.Combine(localAppData, "AzimuthRPC", "logs");
+        Directory.CreateDirectory(directory);
+        return Create(Path.Combine(directory, "AzimuthRPC.log"));
     }
 
     private static FileLog Create(string path)
@@ -187,7 +175,12 @@ internal sealed class FileLog : IDisposable
         Directory.CreateDirectory(Path.GetDirectoryName(path) ?? AppContext.BaseDirectory);
 
         if (File.Exists(path) && new FileInfo(path).Length > MaxBytes)
-            File.WriteAllText(path, string.Empty);
+        {
+            string rotated = path + ".1";
+            if (File.Exists(rotated))
+                File.Delete(rotated);
+            File.Move(path, rotated);
+        }
 
         var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
         var writer = new StreamWriter(stream) { AutoFlush = true };
