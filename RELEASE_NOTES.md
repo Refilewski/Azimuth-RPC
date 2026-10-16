@@ -1,13 +1,12 @@
-# AzimuthRPC v0.9.3
+# AzimuthRPC v0.9.4
 
-Diagnostics, Rich Presence and release packaging cleanup release.
+Small standalone packaging and diagnostics fix release.
 
-- Standalone `AzimuthRPC.exe` now writes `AzimuthRPC.log` beside the executable when possible, with a `%LOCALAPPDATA%\AzimuthRPC\AzimuthRPC.log` fallback if the application directory is not writable.
-- The standalone log records the AzimuthRPC version, Azimuth process attachment state, FH2 mapping state, Discord IPC state, Rich Presence details/state and runtime errors.
-- Native FH2ML logging continues to record the detected FH2 base, Discord IPC connection state, loaded module names, Rich Presence updates and car-probe diagnostics.
-- Car detection diagnostics include the `AudioEngine + 0x278` probe result, parser reason, raw ASCII and 64 raw bytes in hex whenever that probe changes.
-- Empty fallback state text is not sent to Discord on screens where no useful state value is available.
-- Standalone and FH2ML package versions are aligned at 0.9.3.
+- The standalone `AzimuthRPC.exe` now embeds its application icon directly in the published executable.
+- Standalone diagnostics logging writes `AzimuthRPC.log` beside the executable when possible, with a `%LOCALAPPDATA%\AzimuthRPC\AzimuthRPC.log` fallback if the application directory is not writable.
+- Fixed a standalone logger naming collision that could break the build after the logging changes.
+- Release notes are now validated against the project version in CI to prevent publishing stale notes under a newer tag.
+- Standalone and FH2ML package versions are aligned at 0.9.4.
 
 ## Supported game build
 
