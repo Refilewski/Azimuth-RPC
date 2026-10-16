@@ -19,7 +19,7 @@ internal static class Program
         using var log = FileLog.Open();
         bool smokeTest = args.Contains("--smoke-test", StringComparer.OrdinalIgnoreCase);
         log.Write($"AzimuthRPC {VersionInfo.Version} standalone started{(smokeTest ? " (smoke test)" : string.Empty)}");
-        log.Write($"Log file: {log.Path}");
+        log.Write($"Log file: {log.FilePath}");
 
         try
         {
@@ -156,11 +156,11 @@ internal sealed class FileLog : IDisposable
 
     private FileLog(string path, StreamWriter writer)
     {
-        Path = path;
+        FilePath = path;
         _writer = writer;
     }
 
-    internal string Path { get; }
+    internal string FilePath { get; }
 
     internal static FileLog Open()
     {
