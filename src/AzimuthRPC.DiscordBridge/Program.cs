@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
 
-const int DefaultPort = 64630;
 int port = ParsePort(args);
 using var stop = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) =>
@@ -55,7 +54,7 @@ static int ParsePort(string[] args)
     }
 
     value ??= Environment.GetEnvironmentVariable("AZIMUTHRPC_BRIDGE_PORT");
-    if (string.IsNullOrWhiteSpace(value)) return DefaultPort;
+    if (string.IsNullOrWhiteSpace(value)) return 64630;
     if (!int.TryParse(value, out int port) || port is < 1 or > 65535)
         throw new ArgumentOutOfRangeException(nameof(args), "Bridge port must be between 1 and 65535.");
     return port;
