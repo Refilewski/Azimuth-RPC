@@ -102,7 +102,7 @@ internal sealed class DiscordIpcClient : IAsyncDisposable
 
     private static async Task<Stream?> OpenTcpBridgeAsync(string endpoint, CancellationToken cancellationToken)
     {
-        if (!TryParseLoopbackEndpoint(endpoint, out IPAddress? address, out int port))
+        if (!TryParseLoopbackEndpoint(endpoint, out IPAddress? address, out int port) || address is null)
             throw new InvalidOperationException($"{BridgeEnvironmentVariable} must be a loopback endpoint such as 127.0.0.1:64630.");
 
         var socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
