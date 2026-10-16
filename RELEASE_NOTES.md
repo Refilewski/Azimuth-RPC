@@ -1,12 +1,14 @@
-# AzimuthRPC v0.9.4
+# AzimuthRPC v0.9.5
 
-Small standalone packaging and diagnostics fix release.
+Reliability and diagnostics cleanup for both the standalone app and FH2ML native mod.
 
-- The standalone `AzimuthRPC.exe` now embeds its application icon directly in the published executable.
-- Standalone diagnostics logging writes `AzimuthRPC.log` beside the executable when possible, with a `%LOCALAPPDATA%\AzimuthRPC\AzimuthRPC.log` fallback if the application directory is not writable.
-- Fixed a standalone logger naming collision that could break the build after the logging changes.
-- Release notes are now validated against the project version in CI to prevent publishing stale notes under a newer tag.
-- Standalone and FH2ML package versions are aligned at 0.9.4.
+- Throttled Discord Rich Presence updates to a minimum 4-second interval while still sending the latest pending state.
+- Moved standalone and native logs to `%LOCALAPPDATA%\AzimuthRPC\logs\AzimuthRPC.log`.
+- Logs now rotate to `AzimuthRPC.log.1` after 2 MB instead of deleting previous diagnostics.
+- Fixed the FH2ML native version string so it matches the packaged mod version.
+- CI now validates the standalone, manifest and native C++ versions together.
+- Removed the unused public `rpc-config.example.json` file; the standalone app does not expose file-based configuration.
+- Kept native teardown non-blocking to match FH2ML ABI v1, which has no hot-unload contract.
 
 ## Supported game build
 
@@ -14,12 +16,4 @@ Forza Horizon 2 Xbox One build 1.0.0.64 via Azimuth.
 
 ## Reporting issues
 
-For standalone issues, reproduce the problem and attach `AzimuthRPC.log` from beside `AzimuthRPC.exe`. If that folder is not writable, check `%LOCALAPPDATA%\AzimuthRPC\AzimuthRPC.log`.
-
-For FH2ML car-detection issues, attach the native `AzimuthRPC.log`; useful lines begin with `Car probe:` and include the parser result plus the raw bytes around the current car field.
-
-## Known limitations
-
-- The native FH2ML mod does not yet use the full FH2ML host API because the shared SDK header is not vendored in this repository.
-- Native event-vs-free-roam telemetry is not yet promoted into the FH2ML DLL.
-- Mainland location names currently come from coordinate anchors/coarse polygons; native road/region/landmark discovery is still research work.
+Logs are stored at `%LOCALAPPDATA%\AzimuthRPC\logs\AzimuthRPC.log`. If rotation occurs, the previous log is retained as `AzimuthRPC.log.1`.

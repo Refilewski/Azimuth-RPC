@@ -60,8 +60,16 @@ jobs:
           $modVersion = [string]$manifest.version
           if ([string]::IsNullOrWhiteSpace($modVersion)) { throw 'Native mod version not found' }
 
+          $nativeSource = Get-Content 'native/FH2ML.AzimuthRPC/AzimuthRpcMod.cpp' -Raw
+          $nativeMatch = [regex]::Match($nativeSource, 'constexpr\s+char\s+kVersion\[\]\s*=\s*"([^"]+)"')
+          if (-not $nativeMatch.Success) { throw 'Native C++ kVersion not found' }
+          $nativeVersion = $nativeMatch.Groups[1].Value
+
           if ($version -ne $modVersion) {
             throw "Standalone version $version does not match native mod version $modVersion"
+          }
+          if ($version -ne $nativeVersion) {
+            throw "Standalone version $version does not match native C++ version $nativeVersion"
           }
 
           $notesHeading = (Get-Content 'RELEASE_NOTES.md' -TotalCount 1).Trim()
