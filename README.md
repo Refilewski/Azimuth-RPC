@@ -1,87 +1,49 @@
-# AzimuthRPC
+<p align="center">
+  <img src="src/AzimuthRPC.Debug/Assets/AzimuthRPC.ico" alt="AzimuthRPC" width="128" />
+</p>
 
-Author and maintainer: **Refilewski**.
+<h1 align="center">AzimuthRPC</h1>
 
-Discord Rich Presence for Forza Horizon 2 running through Azimuth, with both a standalone Windows host and a native FH2ML mod.
+<p align="center">
+  Discord Rich Presence for <strong>Forza Horizon 2 on Azimuth</strong>.<br />
+  Show your current car, speed, approximate location and in-game activity directly on Discord.
+</p>
 
-**0.9.1 — dual-runtime release line.** The project ships two supported build targets from the same repository:
+<p align="center">
+  <a href="https://github.com/Refilewski/Azimuth-RPC/releases/latest"><img src="https://img.shields.io/badge/Download-Latest%20release-5865F2?style=for-the-badge&logo=github" alt="Download latest release" /></a>
+  <a href="https://github.com/Refilewski/Azimuth-RPC/issues"><img src="https://img.shields.io/badge/Report-Issue-d73a4a?style=for-the-badge&logo=github" alt="Report an issue" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Source--available-2ea44f?style=for-the-badge" alt="Source-available license" /></a>
+</p>
 
-- `AzimuthRPC.exe` — standalone Windows x64 tray application.
-- `AzimuthRPC.dll` — native x64 FH2ML mod, also packaged with `mod.json` and its README.
+## Features
 
-## Supported setup
+- Live Discord Rich Presence for Forza Horizon 2 through Azimuth.
+- Current car detection with friendly vehicle names.
+- Live speed display.
+- Approximate mainland location from player position.
+- Detection for Pause Menu, Photo Mode, World Map, Horizon Hub, Garage and Loading states.
+- Two ways to run it: a standalone Windows tray app or a native FH2ML mod.
+- Automatic Discord reconnect and presence refresh.
+- Native diagnostic logging for compatibility and car-detection reports.
+- Source available for inspection, local builds and development under the project license.
 
-AzimuthRPC targets **Forza Horizon 2 Xbox One 1.0.0.64** on Windows x64 through Azimuth. The supported image identity is PE timestamp `565501ED`, image size `3A18000`, entry RVA `F18058`.
+## Download & install
 
-Unsupported game builds fail closed instead of applying the known offsets to an unknown layout.
+Requires **Discord desktop**, **Windows x64**, Azimuth and your own copy of Forza Horizon 2.
 
-**No game files or raw memory captures are included in this tree.** Users need their own copy of Forza Horizon 2. Tests construct minimal synthetic memory; they do not ship game assets.
+Download the newest build from [GitHub Releases](https://github.com/Refilewski/Azimuth-RPC/releases/latest).
 
-The development setup uses Azimuth on Windows x64. The FH2 image check does not certify every Azimuth version or mod combination. Report the exact Azimuth/FH2ML versions when testing a different setup.
+### Standalone
 
-## What it detects
+1. Download the Windows standalone package from the latest release.
+2. Start Discord desktop.
+3. Launch Azimuth and Forza Horizon 2.
+4. Run `AzimuthRPC.exe`.
+5. AzimuthRPC stays in the system tray and connects automatically when the supported FH2 build is detected.
 
-Current validated/runtime support includes:
+### FH2ML mod
 
-- mapped FH2 build and GameBase discovery;
-- current car ID/name;
-- speed and live XYZ/velocity data;
-- Pause, Photo Mode, World Map, Horizon Hub, Garage and Loading states;
-- Discord Rich Presence over Discord's local named-pipe IPC;
-- mainland macro-location resolution used by presence.
-
-The current location resolver is based on live player coordinates plus validated anchors/coarse polygons. It is **not** a discovered native FH2 road/region API. Native road/landmark/location research remains separate under `docs/research/`.
-
-## Standalone EXE
-
-The standalone build is a tray-only RPC host. Start Discord desktop, launch Azimuth/FH2, then run `AzimuthRPC.exe`. It waits for the supported game image automatically. Use the tray menu to exit. Run one RPC runtime at a time to avoid duplicate presence updates. The developer WPF/research UI is a separate build target.
-
-Build it with:
-
-```powershell
-./publish.ps1
-```
-
-Output:
-
-```text
-artifacts/AzimuthRPC-0.9.1-win-x64/AzimuthRPC.exe
-```
-
-## FH2ML native mod
-
-`native/FH2ML.AzimuthRPC` is a separate native C++ implementation intended for FH2ML. It does **not** host the .NET runtime inside Azimuth.
-
-The DLL currently:
-
-- exports `FH2ML_Initialize`;
-- validates the supported FH2 image;
-- performs guarded direct in-process reads for the current car, speed and position;
-- reproduces the current memory-based UI/state detection;
-- resolves the current mainland macro location from player coordinates;
-- talks directly to Discord IPC;
-- writes `AzimuthRPC.log` beside the Azimuth executable for public diagnostics.
-
-For car-detection reports, the native log records the `AudioEngine + 0x278` parse result plus 64 raw bytes as ASCII/hex when that field changes. It also lists loaded module file names so compatibility reports can show setups such as Extra Options or radio mods without exposing full paths.
-
-When there is no useful second Rich Presence line to show, the native mod now omits Discord's `state` field instead of displaying a redundant fallback such as `Forza Horizon 2 via AzimuthRPC`.
-
-Build it with:
-
-```powershell
-./native/FH2ML.AzimuthRPC/build.ps1
-```
-
-Package layout:
-
-```text
-artifacts/FH2ML-AzimuthRPC-0.9.1/
-  AzimuthRPC.dll
-  mod.json
-  README.md
-```
-
-Install the package as one FH2ML manifest mod, for example:
+Download `FH2ML-AzimuthRPC-<version>.zip` from the latest release and extract it as one FH2ML mod:
 
 ```text
 Azimuth/
@@ -92,74 +54,63 @@ Azimuth/
       README.md
 ```
 
-The native MVP does not install gameplay patches or the standalone debug host's external telemetry hooks. Event-vs-free-roam telemetry and native road/region discovery are still follow-up work.
+The native mod runs inside Azimuth/FH2ML and talks directly to Discord IPC. Do not run the standalone EXE and FH2ML DLL at the same time, or both may try to update the same Rich Presence.
 
-## Build and test
+## Compatibility
 
-Windows x64 with the .NET 8 SDK/Windows Desktop targeting pack is required for the managed solution. Building the native mod additionally requires Visual Studio Build Tools and CMake.
+AzimuthRPC currently targets **Forza Horizon 2 Xbox One 1.0.0.64** on Windows x64 through Azimuth. Unknown game builds are rejected instead of using offsets against an unsupported executable.
 
-Run the full managed validation and smoke test with:
+Compatibility can vary with Azimuth and FH2ML versions or other mods. If something breaks, include your exact setup in the issue report.
+
+**Linux / Wine support is not available yet.** A Linux Discord IPC path/bridge is being explored.
+
+## Diagnostics & privacy
+
+The FH2ML version writes `AzimuthRPC.log` beside the Azimuth executable. It can contain runtime telemetry, memory probe values, loaded module names and Discord IPC status, so **review the log before uploading it publicly**.
+
+AzimuthRPC does not ask for your Discord password or token. No game files, saves or raw memory captures are included in this repository.
+
+## Build from source
+
+The managed projects require the **.NET 8 SDK** on Windows x64. Building the native FH2ML DLL additionally requires **Visual Studio Build Tools** and **CMake**.
+
+Standalone build:
+
+```powershell
+./publish.ps1
+```
+
+Native FH2ML build:
+
+```powershell
+./native/FH2ML.AzimuthRPC/build.ps1
+```
+
+Full validation and smoke test:
 
 ```powershell
 ./build.ps1 -SmokeTest
 ```
 
-The regression suites are executable assertion projects rather than a VSTest adapter:
+More technical information is available in [`docs/`](docs/), including architecture, offsets and reverse-engineering research. Contribution requirements are documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-```powershell
-dotnet build AzimuthRPC.sln -c Release
-dotnet run --project tests/FH2UiMode.Tests -c Release --no-build
-dotnet run --project tests/AzimuthRPC.Core.Tests -c Release --no-build
-```
+## Reporting issues
 
-## Repository layout
+When reporting a problem, include:
 
-```text
-src/AzimuthRPC.App/            public standalone tray app
-src/AzimuthRPC.Core/           shared managed snapshot/state/presence logic
-src/AzimuthRPC.Debug/          developer WPF + reverse-engineering tools
-src/AzimuthRPC.InProcess/      managed guarded-read adapter experiments
-native/FH2ML.AzimuthRPC/       native FH2ML Discord RPC mod
-tests/                         regression suites and committed fixtures
-docs/                          architecture, offsets, provenance and research
-```
+- Azimuth version;
+- FH2ML version if used;
+- AzimuthRPC version and whether you use the EXE or DLL;
+- other FH2 mods such as Extra Options;
+- the exact car or game state where the problem occurs;
+- a reviewed `AzimuthRPC.log` when relevant.
 
-Live research dumps remain local/ignored. Only purpose-built synthetic regression data belongs in `tests/fixtures/`; see [fixture policy](tests/fixtures/README.md).
+Do not upload game files or raw memory dumps.
 
-## Release assets and diagnostics
+## License
 
-The release pipeline builds `AzimuthRPC.exe`, `AzimuthRPC.dll` and
-`FH2ML-AzimuthRPC-<version>.zip`. Version 0.9.1 in the source does not imply that
-a 0.9.1 GitHub Release has been published. This cleanup does not publish one.
+AzimuthRPC is **source-available**, not OSI open source. The [AzimuthRPC Use-Only License 1.0](LICENSE) allows inspection, local compilation and personal use. Reuse of the code in another project or redistribution requires separate permission.
 
-The native runtime writes `AzimuthRPC.log` beside Azimuth. It can contain runtime
-telemetry, memory probe values (including car-field bytes), loaded module
-filenames and Discord IPC state. **Inspect/redact logs before uploading them
-publicly.** Module filename logging does not include full module paths, but other
-diagnostics may still reveal personal context. Standalone failures can also be
-investigated with the separate debug host; not every native diagnostic is emitted
-by the standalone EXE.
+## Disclaimer
 
-For a missing car or other bug, use the issue form and include Azimuth version,
-FH2 build, AzimuthRPC version, EXE/DLL choice, FH2ML version, Extra Options version,
-other mods, exact car, where in game it happens and a reviewed `AzimuthRPC.log`
-when the native runtime is used. Never attach raw memory dumps or game files.
-
-## Research status
-
-The project keeps reverse-engineering tooling because several useful FH2 signals are still being validated. In particular, a real native road/region/landmark source has not yet been promoted to production. See [MAP-RESEARCH](docs/research/MAP-RESEARCH.md), [OFFSETS](docs/OFFSETS.md) and [RESEARCH](docs/RESEARCH.md).
-
-## Contribution and license status
-
-See [CONTRIBUTING](CONTRIBUTING.md) for build/test requirements and data policy.
-The [AzimuthRPC Use-Only License 1.0](LICENSE) permits inspection, installation,
-local compilation and use, with the copies/backups needed for those activities.
-Reusing code in another project and redistributing code or binaries require
-separate written permission. GitHub hosting permissions and mandatory legal
-exceptions remain unaffected. This is source-available software, not open source.
-The repository remains private pending history migration and maintainer review.
-The license does not override third-party rights; research provenance is recorded
-in [PROVENANCE](docs/PROVENANCE.md).
-The manual history/visibility procedure is in [PUBLIC_RELEASE](docs/PUBLIC_RELEASE.md).
-
-
+AzimuthRPC is an independent fan project by **Refilewski**. It is not affiliated with Microsoft, Xbox, Playground Games, Turn 10, Discord or Azimuth. No game, DLC, game files or license keys are included.
