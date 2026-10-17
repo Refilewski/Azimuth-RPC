@@ -18,5 +18,24 @@ try {
         $process = Start-Process -FilePath $exe -ArgumentList '--smoke-test' -WindowStyle Hidden -PassThru
         if (-not $process.WaitForExit(15000)) { throw 'Public tray smoke test timed out' }
         if ($process.ExitCode -ne 0) { throw "Public tray smoke test failed: $($process.ExitCode)" }
+        # A zero exit code is not enough: confirm the EXE actually wrote its
+        # bootstrap diagnostics (especially important for tray-only apps).
+        $candidates = @(
+            (Join-Path $env:LOCALAPPDATA 'AzimuthRPC\logs\AzimuthRPC.log'),
+            (Join-Path ([IO.Path]::GetTempPath()) 'AzimuthRPC\AzimuthRPC.log')
+        )
+        $startupLogged = $false
+        foreach ($candidate in $candidates) {
+            if ((Test-Path -LiteralPath $candidate) -and
+                ((Get-Content -LiteralPath $candidate -Raw) -match 'standalone started \(smoke test\)')) {
+                $startupLogged = $true
+                Write-Host "Verified standalone startup log at: $candidate"
+                break
+            }
+        }
+        if (-not $startupLogged) {
+            throw "Public tray smoke test did not create a startup log in either AppData or TEMP"
+        }
+
     }
 } finally { Pop-Location }
