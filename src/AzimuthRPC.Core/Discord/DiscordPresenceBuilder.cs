@@ -37,6 +37,9 @@ internal static class DiscordPresenceBuilder
                 parts.Add($"{Math.Max(0, (int)(Math.Round(speed / 5f, MidpointRounding.AwayFromZero) * 5))} km/h");
             if (parts.Count > 0) state = string.Join(" | ", parts);
         }
+        // Discord should show only "Loading Race", without a stale car,
+        // speed or the generic "Forza Horizon 2 via Azimuth" second line.
+        if (details == "Loading Race") state = string.Empty;
         return new(details, state, sessionStart, options);
     }
 }
