@@ -29,7 +29,7 @@ public sealed class GameSnapshotReader
         var raw = frame.Read(audio, 0x2C0);
         if (raw is null) return GameSnapshot.Unavailable("Audio/vehicle snapshot read failed");
         var ui = UiModeReader.ReadSnapshot(gameBase, true, frame.Read);
-        string? car = ReadCar(raw.AsSpan(0x278, 64));
+        string? car = ReadCar(raw.AsSpan(0x278, 64), out string carProbeStatus);
         if (car != _lastCarId) { _lastCarId = car; _displayName = FriendlyCarName(car); }
         float mph = F32(raw, 0x90);
         float? speed = float.IsFinite(mph) && mph >= 0 && mph <= 400 ? mph : null;
@@ -47,6 +47,7 @@ public sealed class GameSnapshotReader
             GameBase = gameBase,
             Roots = new(player, audio, registry),
             Car = new(car, _displayName),
+            CarProbeStatus = carProbeStatus,
             Vehicle = vehicle,
             UiMode = ui.Mode,
             Raw = new(ui.Frontend.Valid, ui.Frontend.HubFamily, ui.Flow.Valid, ui.Flow.Primary, ui.Flow.Secondary, ui.GameManager.Valid, ui.GameManager.Loading, ui.GameManager.LoadA, ui.GameManager.LoadB),
@@ -66,13 +67,44 @@ public sealed class GameSnapshotReader
         float x = F32(data, offset), y = F32(data, offset + 4), z = F32(data, offset + 8);
         return float.IsFinite(x) && float.IsFinite(y) && float.IsFinite(z) && MathF.Abs(x) <= bound && MathF.Abs(y) <= bound && MathF.Abs(z) <= bound ? new Vector3(x, y, z) : null;
     }
-    private static string? ReadCar(ReadOnlySpan<byte> bytes)
+    private static string? ReadCar(ReadOnlySpan<byte> bytes, out string status)
     {
-        int end = bytes.IndexOf((byte)0); if (end < 0) end = bytes.Length;
-        if (end < 5 || end > 63) return null;
-        for (int i = 0; i < end; i++) if (bytes[i] < 32 || bytes[i] > 126) return null;
-        var value = Encoding.ASCII.GetString(bytes[..end]);
-        return value.Contains('_') && value.All(c => char.IsLetterOrDigit(c) || c == '_') ? value : null;
+        int end = bytes.IndexOf((byte)0);
+        if (end < 0 || end > 63)
+        {
+            status = "unterminated";
+            return null;
+        }
+        if (end == 0)
+        {
+            status = "empty";
+            return null;
+        }
+        if (end < 5)
+        {
+            status = "too-short";
+            return null;
+        }
+        for (int i = 0; i < end; i++)
+        {
+            byte b = bytes[i];
+            if (!((b >= 'A' && b <= 'Z') ||
+                  (b >= 'a' && b <= 'z') ||
+                  (b >= '0' && b <= '9') || b == '_'))
+            {
+                status = "invalid-character";
+                return null;
+            }
+        }
+
+        string value = Encoding.ASCII.GetString(bytes[..end]);
+        if (!value.Contains('_'))
+        {
+            status = "missing-underscore";
+            return null;
+        }
+        status = "ok";
+        return value;
     }
     private static string? FriendlyCarName(string? raw)
     {
