@@ -1,7 +1,7 @@
 {
   "id": "azimuth-rpc",
   "name": "AzimuthRPC",
-  "version": "0.9.8",
+  "version": "0.9.9",
   "author": "Refilewski",
   "entry": "AzimuthRPC.dll",
   "enabled": true,
