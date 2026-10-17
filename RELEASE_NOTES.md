@@ -1,24 +1,17 @@
-# AzimuthRPC v0.9.8
+# AzimuthRPC v0.9.9
 
-Standalone EXE and FH2ML DLL diagnostic reliability update.
+Discord Rich Presence polish and car-detection diagnostics.
 
-- The standalone EXE now shows a startup error if logging cannot be initialized instead of exiting without explanation.
-- If the standard AppData log is unavailable, standalone logging falls back to `%TEMP%\AzimuthRPC\AzimuthRPC.log` and tells the user where it is.
-- Added an **Open log folder** item to the Windows system-tray menu and a clear notice when AzimuthRPC is already running.
-- The CI standalone smoke test now verifies the creation of a real startup log, not just the process exit code.
-- Keeps the v0.9.7 native DLL diagnostics: `FH2ML_Initialize` records startup before checking the host API, including a reason for incompatible API, missing callbacks, and unsupported FH2 image checks.
-- Corrected the documented log path.
+- "Loading Race" now appears **without a second line**: removes the generic "Forza Horizon 2 via Azimuth" state and prevents a stale car or speed from being shown while loading. This applies to both standalone EXE and native FH2ML DLL.
+- The standalone log now records changes to a compact, privacy-conscious snapshot diagnostic: game UI mode, inferred activity, hook/telemetry status, event context and car ID parse result. No raw game-memory bytes are dumped.
+- Car ID validation now reports a reason such as `empty`, `too-short`, `unterminated`, `invalid-character`, `missing-underscore`, or `ok` so users with missing vehicle names can provide actionable logs.
+- Adds automated regression coverage for race-loading second-line suppression and snapshot diagnostics.
+- Retains v0.9.8 standalone startup log fallback and the log folder shortcut, plus the v0.9.7 native startup diagnostics.
 
-**This update does not modify car offsets or prove compatibility with Azimuth 0.9.10.** It's designed to help investigate installations where the car does not show up or diagnostics never appear.
+## Compatibility
 
-## Logs
+Still targets FH2 Xbox One 1.0.0.64 through Azimuth. This release does **not** change memory offsets or claim confirmed compatibility with every Azimuth version or mod combination.
 
-Standard location for both EXE and FH2ML DLL: `%LOCALAPPDATA%\AzimuthRPC\logs\AzimuthRPC.log`. The previous log is rotated as `AzimuthRPC.log.1` when needed.
+## Collecting useful reports
 
-Standalone fallback when AppData cannot be used: `%TEMP%\AzimuthRPC\AzimuthRPC.log`.
-
-If no log appears even with v0.9.8, check whether the EXE actually launches (or is already running in the tray), or whether the FH2ML loader calls the DLL initializer. Include your exact Azimuth version, FH2ML version if applicable, EXE vs DLL, active mods (especially Extra Options) and screenshots of any startup errors in your report. Review logs for sensitive info before sharing.
-
-## Supported game build
-
-Forza Horizon 2 Xbox One build 1.0.0.64 via Azimuth. Compatibility with individual Azimuth/FH2ML versions requires live testing.
+Use `%LOCALAPPDATA%\AzimuthRPC\logs\AzimuthRPC.log` (or the standalone fallback `%TEMP%\AzimuthRPC\AzimuthRPC.log`). Include the **Snapshot diagnostic:** lines with your Azimuth version, other mods such as Extra Options, and whether you used the EXE or FH2ML DLL. Please review/redact any sensitive data before sharing.
