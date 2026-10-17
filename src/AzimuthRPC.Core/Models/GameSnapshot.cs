@@ -21,6 +21,8 @@ public sealed record GameSnapshot
     public string Build { get; init; } = "FH2 Xbox One 1.0.0.64";
     public RootPointers Roots { get; init; } = new();
     public CarState Car { get; init; } = new();
+    // Diagnostic only: classification of the car ID field, no raw heap bytes.
+    public string CarProbeStatus { get; init; } = "Not sampled";
     public VehicleState Vehicle { get; init; } = new();
     public UiMode UiMode { get; init; }
     public GameActivity Activity { get; init; }
