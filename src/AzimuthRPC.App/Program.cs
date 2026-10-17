@@ -12,29 +12,60 @@ internal static class Program
     {
         ApplicationConfiguration.Initialize();
 
+        bool smokeTest = args.Contains("--smoke-test", StringComparer.OrdinalIgnoreCase);
         using var mutex = new Mutex(true, @"Local\AzimuthRPC", out bool firstInstance);
         if (!firstInstance)
+        {
+            if (!smokeTest)
+                MessageBox.Show("AzimuthRPC is already running. Check the Windows system tray for its icon and log-folder menu.",
+                    "AzimuthRPC already running", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
+        }
 
-        using var log = FileLog.Open();
-        bool smokeTest = args.Contains("--smoke-test", StringComparer.OrdinalIgnoreCase);
-        log.Write($"AzimuthRPC {VersionInfo.Version} standalone started{(smokeTest ? " (smoke test)" : string.Empty)}");
-        log.Write($"Log file: {log.FilePath}");
-
+        FileLog log;
         try
         {
-            var config = new AppConfig { Offline = smokeTest };
-            using var context = new TrayApplicationContext(config, smokeTest, log);
-            Application.Run(context);
+            log = FileLog.Open();
         }
         catch (Exception e)
         {
-            log.Write($"Fatal error: {e}");
+            if (!smokeTest)
+                MessageBox.Show($"AzimuthRPC could not create a startup log in AppData or TEMP, so it cannot start.\n\n{e}",
+                    "AzimuthRPC startup error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             throw;
         }
-        finally
+
+        using (log)
         {
-            log.Write("AzimuthRPC standalone stopped");
+            log.Write($"AzimuthRPC {VersionInfo.Version} standalone started{(smokeTest ? " (smoke test)" : string.Empty)}");
+            log.Write($"Log file: {log.FilePath}");
+
+            if (log.FallbackReason is string fallbackReason)
+            {
+                log.Write($"Primary log unavailable: {fallbackReason}");
+                if (!smokeTest)
+                    MessageBox.Show($"The standard log folder was unavailable. AzimuthRPC is logging to:\n{log.FilePath}\n\nUse the tray menu 'Open log folder' to find it.",
+                        "AzimuthRPC log fallback", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+
+            try
+            {
+                var config = new AppConfig { Offline = smokeTest };
+                using var context = new TrayApplicationContext(config, smokeTest, log);
+                Application.Run(context);
+            }
+            catch (Exception e)
+            {
+                log.Write($"Fatal error: {e}");
+                if (!smokeTest)
+                    MessageBox.Show($"AzimuthRPC encountered a startup error:\n\n{e.Message}\n\nLog: {log.FilePath}",
+                        "AzimuthRPC error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                throw;
+            }
+            finally
+            {
+                log.Write("AzimuthRPC standalone stopped");
+            }
         }
     }
 }
@@ -59,6 +90,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
         var menu = new ContextMenuStrip();
         menu.Items.Add(new ToolStripMenuItem($"AzimuthRPC {VersionInfo.Version}") { Enabled = false });
         menu.Items.Add(_statusItem);
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("Open log folder", null, (_, _) => OpenLogFolder());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, async (_, _) => await ExitAsync());
 
@@ -115,6 +148,26 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _tray.Text = Tooltip(text);
     }
 
+    private void OpenLogFolder()
+    {
+        try
+        {
+            string folder = Path.GetDirectoryName(_log.FilePath)
+                ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = folder,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception e)
+        {
+            _log.Write($"Could not open log folder: {e.Message}");
+            MessageBox.Show($"Log file: {_log.FilePath}\n\n{e.Message}",
+                "AzimuthRPC log location", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
     private static string Tooltip(string value)
     {
         string prefix = "AzimuthRPC — ";
@@ -161,13 +214,25 @@ internal sealed class FileLog : IDisposable
     }
 
     internal string FilePath { get; }
+    internal string? FallbackReason { get; private set; }
 
     internal static FileLog Open()
     {
-        string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        string directory = Path.Combine(localAppData, "AzimuthRPC", "logs");
-        Directory.CreateDirectory(directory);
-        return Create(Path.Combine(directory, "AzimuthRPC.log"));
+        try
+        {
+            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (string.IsNullOrWhiteSpace(localAppData))
+                throw new IOException("Windows did not return a LocalAppData path.");
+
+            return Create(Path.Combine(localAppData, "AzimuthRPC", "logs", "AzimuthRPC.log"));
+        }
+        catch (Exception primaryError) when (primaryError is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            string fallbackPath = Path.Combine(Path.GetTempPath(), "AzimuthRPC", "AzimuthRPC.log");
+            var log = Create(fallbackPath);
+            log.FallbackReason = primaryError.GetType().Name + ": " + primaryError.Message;
+            return log;
+        }
     }
 
     private static FileLog Create(string path)
