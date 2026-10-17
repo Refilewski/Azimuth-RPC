@@ -1,6 +1,6 @@
 # AzimuthRPC as an FH2ML native mod
 
-This directory builds the native x64 `AzimuthRPC.dll` shipped with AzimuthRPC 0.9.1 and intended to be loaded by FH2ML as a manifest mod.
+This directory builds the native x64 `AzimuthRPC.dll` intended to be loaded by FH2ML as a manifest mod.
 
 The implementation is deliberately native C++ and does **not** host the .NET runtime inside Azimuth.
 
@@ -22,13 +22,15 @@ No gameplay patch or hook is installed by this runtime. Event-vs-free-roam telem
 
 ## Diagnostics
 
-The native mod writes:
+The native mod writes (paste this path into Windows Explorer):
 
 ```text
-<Azimuth directory>/AzimuthRPC.log
+%LOCALAPPDATA%\AzimuthRPC\logs\AzimuthRPC.log
 ```
 
-The file is capped at roughly 2 MiB and is truncated automatically once it grows beyond that size.
+The log starts as soon as `FH2ML_Initialize` is called, including early failures caused by an incompatible FH2ML API or unsupported FH2 game image. If there is no log, confirm the mod DLL was loaded and its initializer invoked.
+
+The log rotates after roughly 2 MiB, keeping the previous log as `AzimuthRPC.log.1`.
 
 At startup it records the AzimuthRPC version, loaded module names, the detected FH2 image base and Discord IPC connection state. When the car probe changes it also records:
 
