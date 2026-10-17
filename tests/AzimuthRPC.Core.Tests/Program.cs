@@ -94,6 +94,14 @@ Test("Presence uses recorded modes, shared snapshot and Southern Europe fallback
     Check(DiscordPresenceBuilder.Build(roam, options, now).Details == "Exploring Southern Europe");
     Check(DiscordPresenceBuilder.Build(roam with { Activity = GameActivity.Event }, options, now).Details == "Racing");
     Check(DiscordPresenceBuilder.Build(new(), options, now).Details == "Forza Horizon 2");
+    // On race loading the second line must be entirely omitted. DiscordIpcClient
+    // maps the empty state to no "state" property in the Discord payload.
+    var loading = DiscordPresenceBuilder.Build(games["race-loading"], options, now);
+    Check(loading.Details == "Loading Race" && loading.State == "", "Loading Race must not show generic fallback");
+    var staleCar = games["race-loading"] with { Car = new("TOY_SupraRZ_98", "Toyota Supra RZ"), Activity = GameActivity.RaceLoading };
+    Check(DiscordPresenceBuilder.Build(staleCar, options, now).State == "", "Loading Race must not show stale car");
+    var activityLoading = new GameSnapshot { Attached = true, Activity = GameActivity.RaceLoading };
+    Check(DiscordPresenceBuilder.Build(activityLoading, options, now).State == "", "Activity-based RaceLoading must omit state");
     var fingerprint = DiscordPresenceBuilder.Build(roam, options, now).Fingerprint; options.LargeImageKey = "changed";
     Check(fingerprint != DiscordPresenceBuilder.Build(roam, options, now).Fingerprint, "Asset update was suppressed");
 });
