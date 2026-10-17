@@ -1046,6 +1046,11 @@ std::string BuildDetails(const Snapshot& snapshot)
 
 std::string BuildState(const Snapshot& snapshot)
 {
+    // Keep the second Discord line empty during race loading, even when a
+    // previously selected car is still present in the game memory snapshot.
+    if (snapshot.uiMode == UiMode::Loading)
+        return {};
+
     const bool carContext =
         snapshot.inWorld ||
         snapshot.uiMode == UiMode::PauseMenu ||
