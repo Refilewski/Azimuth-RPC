@@ -42,6 +42,7 @@ foreach (var capture in captures)
             Check(game.UiMode == expected, $"Expected {expected}, got {game.UiMode}");
         }
         Check(game.Car.RawId == capture.CarId);
+        Check(game.CarProbeStatus == "ok", "Synthetic car field should parse successfully");
         Check(game.Car.DisplayName == (capture.CarId == "LAM_Huracan_15" ? "Lamborghini Huracan LP 610-4" : "Toyota Supra RZ"));
         Check(game.Vehicle.Position == new Vector3(100, 20, 300));
         Check(game.Vehicle.Velocity == new Vector3(capture.SpeedMph * .44704f, 0, 0));
@@ -56,6 +57,7 @@ foreach (var capture in captures)
         // A subsequent read failure cannot publish previous car, vectors or roots.
         memory.Fail = true; var unavailable = reader.Capture(gameBase, true);
         Check(!unavailable.Attached && unavailable.Car.RawId is null && unavailable.Vehicle.Position is null && unavailable.Roots.AudioEngine == 0);
+        Check(unavailable.CarProbeStatus == "Not sampled", "Memory failures must not report a successful car read");
         memory.Fail = false;
         int rootReads = 0; memory.BeforeRead = (a, n) => { if (a == gameBase + UiModeReader.AudioEngineRva && ++rootReads == 2) memory.Blocks[a] = Pointer(audio + 0x1000); };
         Check(!reader.Capture(gameBase, true).Attached, "Changing root published a mixed snapshot");
