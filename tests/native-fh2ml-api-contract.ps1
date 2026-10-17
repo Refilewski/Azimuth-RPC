@@ -18,6 +18,26 @@ foreach ($needle in $required) {
     }
 }
 
+# Initialization diagnostics must be written even when FH2ML is incompatible.
+$startIndex = $source.IndexOf('FH2ML_Initialize(const FH2ML_HostAPI* api)')
+$initTraceIndex = $source.IndexOf('Trace(std::string("AzimuthRPC ") + kVersion + " FH2ML_Initialize entered")', $startIndex)
+$firstGuardIndex = $source.IndexOf('if (api == nullptr)', $startIndex)
+if ($startIndex -lt 0 -or $initTraceIndex -lt 0 -or $firstGuardIndex -lt 0 -or
+    $initTraceIndex -gt $firstGuardIndex) {
+    throw 'FH2ML initialization must log entry before checking the host API'
+}
+foreach ($diagnostic in @(
+    'host API pointer is null',
+    'host API table too small',
+    'API version mismatch',
+    'required Log, RegisterMod or GetGameModule callback missing',
+    'GetGameModule returned no supported FH2'
+)) {
+    if (-not $source.Contains($diagnostic)) {
+        throw "Missing native startup diagnostics: $diagnostic"
+    }
+}
+
 if ($source.Contains('VirtualQuery(')) {
     throw 'Native FH2ML mod must use GetGameModule instead of VirtualQuery process scanning'
 }
