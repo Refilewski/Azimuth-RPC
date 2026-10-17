@@ -79,6 +79,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly DebugRuntime _runtime;
     private readonly FileLog _log;
     private string? _lastLoggedStatus;
+    private string? _lastDiagnosticContext;
     private int _exiting;
 
     internal TrayApplicationContext(AppConfig config, bool smokeTest, FileLog log)
@@ -128,6 +129,22 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private void OnRuntimeChanged(DebugStatus status)
     {
+        // Status logs show only what Discord displays. A missing car could mean
+        // no valid game ID, a hidden presence option, or stale race context.
+        // Log the actual classification on change without dumping process memory.
+        string diagnostics = status.Game.Attached
+            ? $"PID={status.ProcessId}; UiMode={status.Game.UiMode}; Activity={status.Game.Activity}; " +
+              $"HooksInstalled={status.Game.Hooks.Installed}; TelemetryActive={status.Game.Hooks.Active}; " +
+              $"EventContext={status.Game.Hooks.EventContext?.ToString() ?? "none"}; " +
+              $"CarProbe={status.Game.CarProbeStatus}; CarId={status.Game.Car.RawId ?? "none"}"
+            : $"PID={status.ProcessId}; Game not attached; Reason={status.Game.Error ?? "unknown"}";
+
+        if (diagnostics != _lastDiagnosticContext)
+        {
+            _lastDiagnosticContext = diagnostics;
+            _log.Write($"Snapshot diagnostic: {diagnostics}");
+        }
+
         string state = string.IsNullOrWhiteSpace(status.Presence.State) ? "<omitted>" : status.Presence.State;
         string next = $"Process={status.Process}; Mapping={status.Mapping}; Discord={status.Discord}; Details=\"{status.Presence.Details}\"; State=\"{state}\"";
         if (string.Equals(next, _lastLoggedStatus, StringComparison.Ordinal))
