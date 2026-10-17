@@ -1218,37 +1218,71 @@ DWORD WINAPI RpcThread(LPVOID)
 
 extern "C" __declspec(dllexport) int FH2ML_Initialize(const FH2ML_HostAPI* api)
 {
-    // FH2ML ABI v1 has no hot-unload contract. Validate the complete v1 host
-    // table up front, register this mod, then hand the worker the host-owned
-    // mapped FH2 module instead of scanning the process address space.
-    if (api == nullptr ||
-        api->size < sizeof(FH2ML_HostAPI) ||
-        api->version != FH2ML_API_VERSION ||
-        api->Log == nullptr ||
+    // Log *before* checking the FH2ML ABI. Otherwise an incompatible loader,
+    // missing API callback, or unsupported game image could return silently and
+    // users would have no AzimuthRPC.log to include in a bug report.
+    Trace(std::string("AzimuthRPC ") + kVersion + " FH2ML_Initialize entered");
+
+    if (api == nullptr)
+    {
+        Trace("FH2ML initialization rejected: host API pointer is null");
+        return 0;
+    }
+    if (api->size < sizeof(FH2ML_HostAPI))
+    {
+        char message[160]{};
+        std::snprintf(
+            message,
+            sizeof(message),
+            "FH2ML initialization rejected: host API table too small (got %zu, expected at least %zu)",
+            static_cast<std::size_t>(api->size),
+            sizeof(FH2ML_HostAPI));
+        Trace(message);
+        return 0;
+    }
+    if (api->version != FH2ML_API_VERSION)
+    {
+        char message[160]{};
+        std::snprintf(
+            message,
+            sizeof(message),
+            "FH2ML initialization rejected: API version mismatch (got %u, expected %u)",
+            static_cast<unsigned int>(api->version),
+            static_cast<unsigned int>(FH2ML_API_VERSION));
+        Trace(message);
+        return 0;
+    }
+    if (api->Log == nullptr ||
         api->RegisterMod == nullptr ||
         api->GetGameModule == nullptr)
     {
+        Trace("FH2ML initialization rejected: required Log, RegisterMod or GetGameModule callback missing");
         return 0;
     }
 
     bool expected = false;
     if (!g_started.compare_exchange_strong(expected, true))
+    {
+        Trace("FH2ML initialization skipped: AzimuthRPC is already running");
         return 1;
+    }
 
     g_stop.store(false, std::memory_order_relaxed);
+    g_hostApi = api;
 
     if (api->RegisterMod("azimuth-rpc", kVersion) == 0)
     {
-        api->Log("azimuth-rpc", "FH2ML RegisterMod rejected AzimuthRPC");
+        Trace("FH2ML initialization rejected: RegisterMod failed");
+        g_hostApi = nullptr;
         g_started.store(false, std::memory_order_relaxed);
         return 0;
     }
 
-    g_hostApi = api;
     const std::uintptr_t gameBase = GetGameBaseFromHost();
     if (gameBase == 0)
     {
-        api->Log("azimuth-rpc", "FH2ML GetGameModule returned no supported FH2 1.0.0.64 image");
+        Trace("FH2ML initialization rejected: GetGameModule returned no supported FH2 1.0.0.64 image");
+        LogLoadedModules();
         g_hostApi = nullptr;
         g_started.store(false, std::memory_order_relaxed);
         return 0;
