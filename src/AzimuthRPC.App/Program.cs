@@ -13,6 +13,7 @@ internal static class Program
         ApplicationConfiguration.Initialize();
 
         bool smokeTest = args.Contains("--smoke-test", StringComparer.OrdinalIgnoreCase);
+        bool keepLogs = args.Contains("--keep-logs", StringComparer.OrdinalIgnoreCase);
         using var mutex = new Mutex(true, @"Local\AzimuthRPC", out bool firstInstance);
         if (!firstInstance)
         {
@@ -48,11 +49,13 @@ internal static class Program
                         "AzimuthRPC log fallback", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
 
+            bool exitedNormally = false;
             try
             {
                 var config = new AppConfig { Offline = smokeTest };
                 using var context = new TrayApplicationContext(config, smokeTest, log);
                 Application.Run(context);
+                exitedNormally = true;
             }
             catch (Exception e)
             {
@@ -65,6 +68,9 @@ internal static class Program
             finally
             {
                 log.Write("AzimuthRPC standalone stopped");
+                // Leave diagnostics behind if startup fails or the process crashes.
+                // Only clean files after the normal tray/smoke-test shutdown.
+                log.DeleteOnDispose = exitedNormally && !keepLogs;
             }
         }
     }
@@ -232,6 +238,7 @@ internal sealed class FileLog : IDisposable
 
     internal string FilePath { get; }
     internal string? FallbackReason { get; private set; }
+    internal bool DeleteOnDispose { get; set; }
 
     internal static FileLog Open()
     {
@@ -281,7 +288,19 @@ internal sealed class FileLog : IDisposable
     {
         lock (_gate)
         {
+            // Close the writer first; Windows otherwise retains the file handle.
             _writer.Dispose();
+            if (!DeleteOnDispose)
+                return;
+
+            // Delete only our known log files, never user files or the folder.
+            // Cleanup is best-effort if antivirus/another process has a file open.
+            foreach (string path in new[] { FilePath, FilePath + ".1" })
+            {
+                try { File.Delete(path); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
         }
     }
 }

@@ -15,7 +15,7 @@ try {
 
     if ($SmokeTest) {
         $exe = Join-Path $PSScriptRoot 'src/AzimuthRPC.App/bin/Release/net8.0-windows/AzimuthRPC.exe'
-        $process = Start-Process -FilePath $exe -ArgumentList '--smoke-test' -WindowStyle Hidden -PassThru
+        $process = Start-Process -FilePath $exe -ArgumentList '--smoke-test', '--keep-logs' -WindowStyle Hidden -PassThru
         if (-not $process.WaitForExit(15000)) { throw 'Public tray smoke test timed out' }
         if ($process.ExitCode -ne 0) { throw "Public tray smoke test failed: $($process.ExitCode)" }
         # A zero exit code is not enough: confirm the EXE actually wrote its
@@ -25,10 +25,12 @@ try {
             (Join-Path ([IO.Path]::GetTempPath()) 'AzimuthRPC\AzimuthRPC.log')
         )
         $startupLogged = $false
+        $verifiedLog = $null
         foreach ($candidate in $candidates) {
             if ((Test-Path -LiteralPath $candidate) -and
                 ((Get-Content -LiteralPath $candidate -Raw) -match 'standalone started \(smoke test\)')) {
                 $startupLogged = $true
+                $verifiedLog = $candidate
                 Write-Host "Verified standalone startup log at: $candidate"
                 break
             }
@@ -37,5 +39,15 @@ try {
             throw "Public tray smoke test did not create a startup log in either AppData or TEMP"
         }
 
+        # Run a normal clean exit and verify the active/rotated files vanish.
+        $cleanupProcess = Start-Process -FilePath $exe -ArgumentList '--smoke-test' -WindowStyle Hidden -PassThru
+        if (-not $cleanupProcess.WaitForExit(15000)) { throw 'Public tray cleanup smoke test timed out' }
+        if ($cleanupProcess.ExitCode -ne 0) { throw "Public tray cleanup smoke test failed: $($cleanupProcess.ExitCode)" }
+        foreach ($candidate in $candidates) {
+            if ($candidate -eq $verifiedLog -and ((Test-Path -LiteralPath $candidate) -or (Test-Path -LiteralPath "$candidate.1"))) {
+                throw "Public tray clean exit left log files behind: $candidate"
+            }
+        }
+        Write-Host "Verified clean shutdown removed standalone active/rotated logs."
     }
 } finally { Pop-Location }

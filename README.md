@@ -68,6 +68,10 @@ Compatibility can vary with Azimuth and FH2ML versions or other mods. If somethi
 
 Both the standalone EXE and the FH2ML DLL write `%LOCALAPPDATA%\\AzimuthRPC\\logs\\AzimuthRPC.log` (paste that path into Windows Explorer). The native DLL now logs as soon as `FH2ML_Initialize` is called, including rejected host API versions or unsupported game-image checks. If no log is created, first verify the executable actually started or the loader called the DLL initializer; an absent log alone does **not** prove that car offsets changed. Logs can contain runtime telemetry, memory probe values, loaded module names and Discord IPC status, so **review the log before uploading it publicly**.
 
+The **standalone EXE automatically removes `AzimuthRPC.log` and its rotated `.1` log after a normal exit** (tray `Exit`). If it crashes or is force-terminated, logs are kept for troubleshooting. To preserve logs while testing, launch the standalone with `--keep-logs`; copy the log before exiting if you need to share it. Cleanup is best-effort if another process keeps the file open.
+
+The FH2ML native DLL still retains logs: it has no safe, guaranteed shutdown callback, and attempting deletion inside `DllMain` during process teardown could cause instability. Don't run the standalone and native DLL at the same time.
+
 AzimuthRPC does not ask for your Discord password or token. No game files, saves or raw memory captures are included in this repository.
 
 ## Build from source
