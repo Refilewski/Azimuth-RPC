@@ -1,6 +1,7 @@
 #include <windows.h>
 #include "FH2ML.h"
 #include "LocationResolver.h"
+#include "CarObjectProbe.h"
 #include <tlhelp32.h>
 
 #include <algorithm>
@@ -13,6 +14,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <unordered_map>
 #include <type_traits>
 #include <vector>
 
@@ -74,6 +76,7 @@ struct Snapshot
     std::uintptr_t gameBase{};
     UiMode uiMode{UiMode::Unknown};
     bool inWorld{};
+    bool telemetryConsistent{};
     std::string carRaw;
     std::string carDisplay;
     float speedKmh{};
@@ -429,52 +432,113 @@ std::string AsciiBytes(const std::uint8_t* data, const std::size_t size)
     return result;
 }
 
-bool ReadCarId(const std::uint8_t* raw, std::string& value, std::string& reason)
+bool ReadCarId(const std::uint8_t* raw, const std::uintptr_t audio,
+               std::string& value, std::string& reason)
 {
     value.clear();
     reason.clear();
+    const std::uint8_t* field = raw + kCarIdOffset;
 
-    std::size_t length = 0;
-    while (length < kCarIdBytes && raw[kCarIdOffset + length] != 0)
-        ++length;
+    // Candidate MSVC std::string with a heap-backed buffer for IDs longer
+    // than 15 bytes. Short IDs use the existing inline ASCII decoder.
+    // This guarded layout is not yet live-validated across mod combinations.
+    std::uint64_t pointer = 0, length = 0, capacity = 0;
+    std::memcpy(&pointer, field, sizeof(pointer));
+    std::memcpy(&length, field + 16, sizeof(length));
+    std::memcpy(&capacity, field + 24, sizeof(capacity));
+    if (length >= 16 && length <= 127 && capacity >= length && capacity <= 4096)
+    {
+        if (!IsPointer(static_cast<std::uintptr_t>(pointer)))
+        {
+            reason = "heap-invalid-pointer";
+            return false;
+        }
 
-    if (length == 0)
+        std::array<std::uint8_t, 128> first{}, second{};
+        std::array<std::uint8_t, 32> fieldAfter{};
+        const std::size_t count = static_cast<std::size_t>(length) + 1;
+        if (!ReadBytes(static_cast<std::uintptr_t>(pointer), first.data(), count) ||
+            !ReadBytes(static_cast<std::uintptr_t>(pointer), second.data(), count))
+        {
+            reason = "heap-unreadable";
+            return false;
+        }
+        if (!ReadBytes(audio + kCarIdOffset, fieldAfter.data(), fieldAfter.size()) ||
+            std::memcmp(field, fieldAfter.data(), fieldAfter.size()) != 0 ||
+            std::memcmp(first.data(), second.data(), count) != 0)
+        {
+            reason = "heap-changed";
+            return false;
+        }
+        if (first[static_cast<std::size_t>(length)] != 0)
+        {
+            reason = "heap-unterminated";
+            return false;
+        }
+
+        bool underscore = false;
+        for (std::size_t i = 0; i < static_cast<std::size_t>(length); ++i)
+        {
+            const unsigned char c = first[i];
+            underscore |= c == '_';
+            if (!((c >= 'A' && c <= 'Z') ||
+                  (c >= 'a' && c <= 'z') ||
+                  (c >= '0' && c <= '9') ||
+                  c == '_'))
+            {
+                reason = "heap-invalid-id";
+                return false;
+            }
+        }
+        if (!underscore)
+        {
+            reason = "heap-invalid-id";
+            return false;
+        }
+
+        value.assign(reinterpret_cast<const char*>(first.data()),
+                     static_cast<std::size_t>(length));
+        reason = "ok-heap";
+        return true;
+    }
+
+    std::size_t inlineLength = 0;
+    while (inlineLength < kCarIdBytes && field[inlineLength] != 0)
+        ++inlineLength;
+
+    if (inlineLength == 0)
     {
         reason = "empty";
         return false;
     }
-    if (length < 5)
+    if (inlineLength < 5)
     {
         reason = "too-short";
         return false;
     }
-    if (length >= kCarIdBytes)
+    if (inlineLength >= kCarIdBytes)
     {
         reason = "unterminated";
         return false;
     }
 
-    for (std::size_t i = 0; i < length; ++i)
+    for (std::size_t i = 0; i < inlineLength; ++i)
     {
-        const unsigned char c = raw[kCarIdOffset + i];
+        const unsigned char c = field[i];
         if (!((c >= 'A' && c <= 'Z') ||
               (c >= 'a' && c <= 'z') ||
               (c >= '0' && c <= '9') ||
               c == '_'))
         {
             char detail[64]{};
-            std::snprintf(
-                detail,
-                sizeof(detail),
-                "invalid-char@%zu=0x%02X",
-                i,
-                static_cast<unsigned int>(c));
+            std::snprintf(detail, sizeof(detail), "invalid-char@%zu=0x%02X",
+                          i, static_cast<unsigned int>(c));
             reason = detail;
             return false;
         }
     }
 
-    value.assign(reinterpret_cast<const char*>(raw + kCarIdOffset), length);
+    value.assign(reinterpret_cast<const char*>(field), inlineLength);
     if (value.find('_') == std::string::npos)
     {
         reason = "missing-underscore";
@@ -682,7 +746,7 @@ Snapshot CaptureSnapshot(const std::uintptr_t gameBase)
 
     std::string car;
     std::string carReason;
-    const bool carParsed = ReadCarId(raw.data(), car, carReason);
+    const bool carParsed = ReadCarId(raw.data(), audio, car, carReason);
     if (carParsed)
     {
         snapshot.carRaw = car;
@@ -719,7 +783,6 @@ Snapshot CaptureSnapshot(const std::uintptr_t gameBase)
     snapshot.uiMode = ReadUiMode(gameBase, audio, raw);
 
     if (snapshot.uiMode == UiMode::Unknown &&
-        !snapshot.carRaw.empty() &&
         mirrorsMatch &&
         snapshot.hasSpeed &&
         FiniteVec(velocity, 500.0f))
@@ -727,10 +790,12 @@ Snapshot CaptureSnapshot(const std::uintptr_t gameBase)
         const float velocityKmh = Length(velocity) * 3.6f;
         if (std::isfinite(velocityKmh) && velocityKmh <= 1000.0f)
         {
-            snapshot.inWorld =
+            snapshot.telemetryConsistent =
                 (snapshot.speedKmh <= 3.0f && velocityKmh <= 5.0f) ||
                 std::fabs(snapshot.speedKmh - velocityKmh) <=
                     std::max(10.0f, snapshot.speedKmh * 0.15f);
+            snapshot.inWorld = !snapshot.carRaw.empty() &&
+                               snapshot.telemetryConsistent;
         }
     }
 
@@ -1114,6 +1179,16 @@ std::string Fingerprint(const Snapshot& snapshot)
     return BuildDetails(snapshot) + "\n" + BuildState(snapshot);
 }
 
+bool ExperimentalCarObjectEnabled()
+{
+    char value[8]{};
+    const DWORD length = GetEnvironmentVariableA(
+        "AZIMUTH_RPC_EXPERIMENTAL_CAR_OBJECT",
+        value,
+        static_cast<DWORD>(sizeof(value)));
+    return length == 1 && value[0] == '1';
+}
+
 DWORD WINAPI RpcThread(LPVOID)
 {
     Sleep(1000);
@@ -1124,11 +1199,20 @@ DWORD WINAPI RpcThread(LPVOID)
     ULONGLONG lastPresenceUpdate = 0;
     std::uint64_t nonce = 0;
     std::string lastFingerprint;
+    bool experimentalCarProbe = ExperimentalCarObjectEnabled();
+    bool carProbeQuarantined = false;
+    std::string lastCarObjectStatus;
+    std::unordered_map<std::uint32_t, std::string> modelNames;
+    std::uint32_t candidateModel = 0;
+    std::string candidateName;
     const std::int64_t sessionStart =
         static_cast<std::int64_t>(std::time(nullptr));
 
     Trace(std::string("AzimuthRPC ") + kVersion + " FH2ML native worker started");
     Trace("Log file: %LOCALAPPDATA%\\AzimuthRPC\\logs\\AzimuthRPC.log");
+    Trace(experimentalCarProbe
+              ? "EXPERIMENTAL local-car object calls ENABLED: game functions called on RPC worker thread (not established thread-safe)"
+              : "EXPERIMENTAL local-car object calls disabled (opt in via AZIMUTH_RPC_EXPERIMENTAL_CAR_OBJECT=1)");
     LogLoadedModules();
 
     while (!g_stop.load(std::memory_order_relaxed))
@@ -1183,7 +1267,68 @@ DWORD WINAPI RpcThread(LPVOID)
         if (now - lastPresenceUpdate >= kPresenceUpdateMs)
         {
             lastPresenceUpdate = now;
-            const Snapshot snapshot = CaptureSnapshot(gameBase);
+            Snapshot snapshot = CaptureSnapshot(gameBase);
+            if (snapshot.valid && experimentalCarProbe && !carProbeQuarantined)
+            {
+                // These *native game calls* are a gated research option only.
+                // No vtables, executable bytes or Extra Options hooks are patched.
+                const CarObjectProbeResult probe = ProbeCurrentCarObject(gameBase);
+                const std::string status =
+                    std::string(CarObjectProbeStatusName(probe.status)) +
+                    (probe.status == CarObjectProbeStatus::Ok
+                         ? " model-id=" + std::to_string(probe.modelId)
+                         : std::string());
+                if (status != lastCarObjectStatus)
+                {
+                    Trace("Local car object: " + status);
+                    lastCarObjectStatus = status;
+                }
+
+                if (probe.status == CarObjectProbeStatus::Fault ||
+                    probe.status == CarObjectProbeStatus::UnsafeRelease ||
+                    probe.status == CarObjectProbeStatus::InvalidCarVtable)
+                {
+                    carProbeQuarantined = true;
+                    Trace("EXPERIMENTAL local-car probe quarantined for session after unsafe result");
+                }
+                else if (probe.status == CarObjectProbeStatus::Ok)
+                {
+                    if (!snapshot.carRaw.empty())
+                    {
+                        // Only learn a name after two consecutive observations
+                        // of the same model+text pairing (car swaps can race).
+                        if (candidateModel == probe.modelId &&
+                            candidateName == snapshot.carDisplay)
+                        {
+                            modelNames[probe.modelId] = snapshot.carDisplay;
+                        }
+                        else
+                        {
+                            candidateModel = probe.modelId;
+                            candidateName = snapshot.carDisplay;
+                        }
+                    }
+                    else
+                    {
+                        const auto existing = modelNames.find(probe.modelId);
+                        snapshot.carDisplay = existing != modelNames.end()
+                            ? existing->second
+                            : "Vehicle model #" + std::to_string(probe.modelId);
+                        // Do not claim this was an AudioEngine raw car ID.
+                        snapshot.inWorld = snapshot.telemetryConsistent;
+                    }
+                }
+                else if (probe.status == CarObjectProbeStatus::NoCar ||
+                         probe.status == CarObjectProbeStatus::NoPlayer)
+                {
+                    // Current-car signal takes precedence over stale audio.
+                    snapshot.carRaw.clear();
+                    snapshot.carDisplay.clear();
+                    snapshot.inWorld = false;
+                    candidateModel = 0;
+                    candidateName.clear();
+                }
+            }
 
             if (snapshot.valid)
             {
