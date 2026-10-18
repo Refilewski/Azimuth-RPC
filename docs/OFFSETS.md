@@ -23,10 +23,10 @@ Mapped headers must match file identity. Preferred base is tried first, then eli
 | Position XYZ | +0xA0/A4/A8; AudioEngine | three float32 world coordinates | CONFIRMED captured / LIKELY world semantics; motion controls; high field/medium complete semantics | Finite, each abs<=100000; no region inference |
 | Position mirror | +0x190/194/198; AudioEngine | three float32 | CONFIRMED duplicate; captured comparisons; high | Same bound; component differences<=1.5 used by fallback |
 | Velocity | +0x170/174/178; AudioEngine | Vector3, likely m/s | CONFIRMED captured / LIKELY units; stopped/moving correlation; high field/medium units | Finite each abs<=500; length*3.6 finite<=1000km/h |
-| Car raw ID | +0x278; AudioEngine | inline ASCII string | CONFIRMED; TOY_SupraRZ_98/LAM_Huracan_15 captures; high | Length5..63, alphanumeric/underscore and includes underscore; not a state detector |
+| Car raw ID | +0x278; AudioEngine | observed inline ASCII; possible MSVC small-string/heap representation | CONFIRMED short IDs only; **EXPERIMENTAL** heap fallback | Inline length5..63; for possible heap strings, validate 64-bit size/capacity/pointer at +0x288/+0x290/+0x278, read at most 128 bytes with double-read guards; not a state detector |
 | UI registry | +0x630; AudioEngine | pointer64 | CONFIRMED; captured pointer traversal; high | Exact canonical aligned pointer; stable chain |
 
-Friendly-name fallback is formatting, not an authoritative car database. CarIn and AudioObjectCar are separate findings.
+Friendly-name fallback is formatting, not an authoritative car database. CarIn and AudioObjectCar are separate findings. The MSVC heap-string decoding path was added to address reports of `invalid-character` car probes, but **no live dump has yet confirmed** that FH2 uses this object layout in the affected sessions. It fails closed on invalid metadata, changed bytes or unreadable pointers; validate against live car swaps before treating this as a production-proven fix.
 
 ## Mixer/UI registry
 
