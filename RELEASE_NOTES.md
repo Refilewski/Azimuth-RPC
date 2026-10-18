@@ -1,17 +1,29 @@
-# AzimuthRPC v0.9.9
+# AzimuthRPC v1.0.0
 
-Discord Rich Presence polish and car-detection diagnostics.
+**Vehicle detection fix — first stable 1.x release.**
 
-- "Loading Race" now appears **without a second line**: removes the generic "Forza Horizon 2 via Azimuth" state and prevents a stale car or speed from being shown while loading. This applies to both standalone EXE and native FH2ML DLL.
-- The standalone log now records changes to a compact, privacy-conscious snapshot diagnostic: game UI mode, inferred activity, hook/telemetry status, event context and car ID parse result. No raw game-memory bytes are dumped.
-- Car ID validation now reports a reason such as `empty`, `too-short`, `unterminated`, `invalid-character`, `missing-underscore`, or `ok` so users with missing vehicle names can provide actionable logs.
-- Adds automated regression coverage for race-loading second-line suppression and snapshot diagnostics.
-- Retains v0.9.8 standalone startup log fallback and the log folder shortcut, plus the v0.9.7 native startup diagnostics.
+Thank you to the FH2 community testers who reproduced the missing-car issue and confirmed the PR #5 standalone test build resolves it in-game.
 
-## Compatibility
+## Fixed
 
-Still targets FH2 Xbox One 1.0.0.64 through Azimuth. This release does **not** change memory offsets or claim confirmed compatibility with every Azimuth version or mod combination.
+- Car detection could stop updating after changing vehicles or returning from a race while Discord and speed telemetry continued to work (`CarProbe=invalid-character`).
+- The car ID reader previously treated `AudioEngine+0x278` as inline text only. It now also supports a guarded, MSVC-style heap-backed string candidate used when an identifier exceeds the short-string capacity.
+- Failed reads no longer reuse a previously valid car name. Memory validation requires sensible pointer/size/capacity metadata, valid NUL-terminated ASCII IDs, and repeated consistent reads before publishing a heap ID.
+- Tests cover long-to-long vehicle changes, returning to a short ID, unreadable or malformed memory, and changes while sampling.
 
-## Collecting useful reports
+## Available builds
 
-Use `%LOCALAPPDATA%\AzimuthRPC\logs\AzimuthRPC.log` (or the standalone fallback `%TEMP%\AzimuthRPC\AzimuthRPC.log`). Include the **Snapshot diagnostic:** lines with your Azimuth version, other mods such as Extra Options, and whether you used the EXE or FH2ML DLL. Please review/redact any sensitive data before sharing.
+- **AzimuthRPC.exe:** standalone Windows x64 application, with the community-tested fix.
+- **FH2ML-AzimuthRPC-1.0.0.zip:** native mod package with the same guarded string reader. The reported live success was for the standalone EXE; native behavior and other mod combinations still warrant independent testing.
+
+## Compatibility and diagnostics
+
+Targets **Forza Horizon 2 Xbox One 1.0.0.64** through Azimuth. This release does **not** add new game memory offsets, require Extra Options, or include the experimental game-object method from PR #6.
+
+The `CarProbe` diagnostic can show `ok` (inline), `ok-heap` (heap-backed), `heap-*` (guarded failure), or `invalid-character`. Report wrong or missing car names with the selected car, game/mod versions, and sanitized logs via [Issue #4](https://github.com/Refilewski/Azimuth-RPC/issues/4).
+
+Please review logs before sharing them; they may include local paths. Standalone logs: `%LOCALAPPDATA%\AzimuthRPC\logs\AzimuthRPC.log` (fallback `%TEMP%\AzimuthRPC\AzimuthRPC.log`).
+
+## Previous improvements
+
+Includes v0.9.9 race-loading presence cleanup, car-probe diagnostics, startup logging and the supported location, speed and activity presence functionality.
