@@ -42,6 +42,12 @@ internal static class Program
             log.Write($"AzimuthRPC {VersionInfo.Version} standalone started{(smokeTest ? " (smoke test)" : string.Empty)}");
             log.Write($"Log file: {log.FilePath}");
 
+            // Regression: open a read handle while the logger still owns its
+            // write handle. This must work without closing or pausing logging.
+            if (smokeTest && !log.ReadSupportLines().Any(line =>
+                    line.Contains("standalone started (smoke test)", StringComparison.Ordinal)))
+                throw new IOException("Live log snapshot read failed during smoke test.");
+
             if (log.FallbackReason is string fallbackReason)
             {
                 log.Write($"Primary log unavailable: {fallbackReason}");
@@ -321,7 +327,19 @@ internal sealed class FileLog : IDisposable
         lock (_gate)
         {
             _writer.Flush();
-            return File.ReadAllLines(FilePath);
+
+            // File.ReadAllLines uses FileShare.Read, which conflicts with our
+            // still-open FileAccess.Write handle. Explicitly allow other readers,
+            // writers and delete/rotation while taking this snapshot.
+            using var stream = new FileStream(
+                FilePath, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            var lines = new List<string>();
+            string? line;
+            while ((line = reader.ReadLine()) is not null)
+                lines.Add(line);
+            return lines.ToArray();
         }
     }
 
