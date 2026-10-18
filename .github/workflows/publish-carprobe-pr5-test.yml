@@ -1,0 +1,57 @@
+name: Publish CarProbe PR5 test release
+
+on:
+  push:
+    branches:
+      - release/carprobe-pr5-test1
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish-test-release:
+    if: github.repository == 'Refilewski/Azimuth-RPC'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Download exact PR 5 tested standalone artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          gh run download 39142951675 --repo "$GITHUB_REPOSITORY" --name AzimuthRPC-0.9.9-win-x64 --dir artifacts
+          test -s artifacts/AzimuthRPC.exe
+          sha256sum artifacts/AzimuthRPC.exe
+
+      - name: Publish separate pre-release, never overwrite official v0.9.9
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag='v0.9.9-carprobe-test.1'
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Tag already has a release; refusing to replace it."
+            exit 1
+          fi
+          cat > release-notes.md <<'NOTES'
+          Experimental build for live FH2 testing: PR #5 (heap-backed car ID reader)
+
+          **TEST BUILD — NOT A VERIFIED FIX.** This is the standalone Windows EXE from PR #5 commit cf92fcaf7021a95034a94940544d0e0019e81bc8. The source changes are NOT merged into main, and the official v0.9.9 remains unchanged.
+
+          Fix candidate: when the inline car ID field becomes invalid after changing vehicles, attempt a guarded MSVC-style heap-string decode. The layout is still a hypothesis; CI build and synthetic regression tests passed, but this candidate needs live verification.
+
+          Test at least five car changes plus a race/garage transition, including cars with long model IDs. Please report actual vehicle name and `CarProbe=ok`, `ok-heap`, `heap-*`, or `invalid-character` from the log. If the identifier is still missing or wrong, attach sanitized logs to issue #4.
+
+          Related: PR #5 https://github.com/Refilewski/Azimuth-RPC/pull/5 and issue #4 https://github.com/Refilewski/Azimuth-RPC/issues/4.
+          NOTES
+          gh release create "$tag" artifacts/AzimuthRPC.exe \
+            --repo "$GITHUB_REPOSITORY" \
+            --target cf92fcaf7021a95034a94940544d0e0019e81bc8 \
+            --title 'AzimuthRPC 0.9.9 - CarProbe TEST 1 (PR #5)' \
+            --notes-file release-notes.md \
+            --prerelease \
+            --latest=false
