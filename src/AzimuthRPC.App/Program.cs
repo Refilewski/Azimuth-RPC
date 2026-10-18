@@ -14,6 +14,7 @@ internal static class Program
 
         bool smokeTest = args.Contains("--smoke-test", StringComparer.OrdinalIgnoreCase);
         bool keepLogs = args.Contains("--keep-logs", StringComparer.OrdinalIgnoreCase);
+        if (smokeTest) SupportLogSender.AssertSanitizationForSmokeTest();
         using var mutex = new Mutex(true, @"Local\AzimuthRPC", out bool firstInstance);
         if (!firstInstance)
         {
@@ -84,6 +85,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly System.Windows.Forms.Timer? _smokeTimer;
     private readonly DebugRuntime _runtime;
     private readonly FileLog _log;
+    private readonly ToolStripMenuItem _sendLogItem;
     private string? _lastLoggedStatus;
     private string? _lastDiagnosticContext;
     private int _exiting;
@@ -99,6 +101,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
         menu.Items.Add(_statusItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Open log folder", null, (_, _) => OpenLogFolder());
+        _sendLogItem = new ToolStripMenuItem("Send logs to Discord...", null, async (_, _) => await SendLogsAsync());
+        menu.Items.Add(_sendLogItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, async (_, _) => await ExitAsync());
 
@@ -191,6 +195,42 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
+    private async Task SendLogsAsync()
+    {
+        if (Volatile.Read(ref _exiting) != 0 || !_sendLogItem.Enabled)
+            return;
+
+        _sendLogItem.Enabled = false;
+        try
+        {
+            string report = SupportLogSender.Prepare(_log.ReadSupportLines());
+            if (string.IsNullOrWhiteSpace(report))
+            {
+                MessageBox.Show("No diagnostic lines are available to send.", "AzimuthRPC",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            if (!SupportLogSender.ConfirmAndPreview(report))
+                return;
+
+            await SupportLogSender.SendAsync(report);
+            MessageBox.Show("Diagnostic log sent to Discord successfully.", "AzimuthRPC",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or HttpRequestException
+                                  or TaskCanceledException or InvalidOperationException)
+        {
+            MessageBox.Show("Could not send the log. Please try again later.\n\n" + e.Message,
+                "AzimuthRPC", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            if (Volatile.Read(ref _exiting) == 0)
+                _sendLogItem.Enabled = true;
+        }
+    }
+
     private static string Tooltip(string value)
     {
         string prefix = "AzimuthRPC — ";
@@ -274,6 +314,15 @@ internal sealed class FileLog : IDisposable
         var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
         var writer = new StreamWriter(stream) { AutoFlush = true };
         return new FileLog(path, writer);
+    }
+
+    internal string[] ReadSupportLines()
+    {
+        lock (_gate)
+        {
+            _writer.Flush();
+            return File.ReadAllLines(FilePath);
+        }
     }
 
     internal void Write(string message)
