@@ -1,0 +1,60 @@
+name: Publish Discord log sharing fix test release
+
+on:
+  push:
+    branches:
+      - release/discord-logsharing-test2
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    if: github.repository == 'Refilewski/Azimuth-RPC'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download successful PR 9 standalone build
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          gh run download 39167214472 --repo "$GITHUB_REPOSITORY" --name AzimuthRPC-0.9.9-win-x64 --dir artifacts
+          test -s artifacts/AzimuthRPC.exe
+          sha256sum artifacts/AzimuthRPC.exe
+
+      - name: Publish separate public pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag='v0.9.9-discord-logs-test.2'
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'Release already exists; refusing overwrite.'
+            exit 1
+          fi
+          cat > release-notes.md <<'NOTES'
+          # AzimuthRPC - Discord Log Upload TEST 2
+
+          **Fixes live log sharing errors from TEST 1.**
+
+          - The Send logs to Discord option can read an active log file without closing AzimuthRPC or the game.
+          - Opens a shared read handle compatible with the running logger's write handle.
+          - New Windows smoke regression reads the log while the writer remains open.
+          - Keeps the preview, manual confirmation, redaction, HTTPS relay, and rate limiting.
+
+          This is a standalone **test pre-release** with the v0.9.9 vehicle reader. It does not include pending PR #5 / v1.0.0 car identification changes, and the server upload still needs real-world validation.
+
+          Source: https://github.com/Refilewski/Azimuth-RPC/pull/9
+          NOTES
+          gh release create "$tag" artifacts/AzimuthRPC.exe \
+            --repo "$GITHUB_REPOSITORY" \
+            --target 977e01b899895c96c190f9bcc36608201fbb49bf \
+            --title 'AzimuthRPC 0.9.9 — Discord Log Upload TEST 2' \
+            --notes-file release-notes.md \
+            --prerelease \
+            --latest=false
