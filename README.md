@@ -72,6 +72,13 @@ The **standalone EXE automatically removes `AzimuthRPC.log` and its rotated `.1`
 
 The FH2ML native DLL still retains logs: it has no safe, guaranteed shutdown callback, and attempting deletion inside `DllMain` during process teardown could cause instability. Don't run the standalone and native DLL at the same time.
 
+### Share diagnostics on Discord (standalone)
+
+Right-click the tray icon and choose **Send logs to Discord...**. A preview shows the exact content and nothing is uploaded until the user clicks Send. The EXE includes only recent diagnostic lines, with common Windows user profile names, credentials, and webhook URLs redacted. Please inspect the preview yourself before sharing.
+
+The app contacts an HTTPS, rate-limited Supabase Edge Function owned by the FH2Mods project. It forwards a text attachment to the Discord support webhook, which is stored in Supabase Vault, **not embedded in the EXE or in GitHub**. This action is optional and does not run at startup or shutdown. The native FH2ML DLL has no tray menu; its logs can still be shared manually.
+
+
 AzimuthRPC does not ask for your Discord password or token. No game files, saves or raw memory captures are included in this repository.
 
 ## Build from source
