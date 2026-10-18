@@ -86,7 +86,8 @@ CarObjectProbeResult ProbeInsideSeh(const std::uintptr_t base) noexcept
                                vtable == base + kPlayerCarVtableRva;
         std::uintptr_t releaseMethod = 0;
         const bool canRelease = validType &&
-                                ReadMemory(vtable + kReleaseSlot, &releaseMethod,\n                                           sizeof(releaseMethod)) &&
+                                ReadMemory(vtable + kReleaseSlot, &releaseMethod,
+                                           sizeof(releaseMethod)) &&
                                 SafeGameCode(base, releaseMethod);
 
         std::uint32_t modelId = 0;
