@@ -1,0 +1,60 @@
+name: Publish Discord log upload test release
+
+on:
+  push:
+    branches:
+      - release/discord-log-test1
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    if: github.repository == 'Refilewski/Azimuth-RPC'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download tested standalone EXE
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          gh run download 39166486563 --repo "$GITHUB_REPOSITORY" --name AzimuthRPC-0.9.9-win-x64 --dir artifacts
+          test -s artifacts/AzimuthRPC.exe
+          sha256sum artifacts/AzimuthRPC.exe
+
+      - name: Create public test pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag='v0.9.9-discord-logs-test.1'
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'Test release already exists; refusing overwrite.'
+            exit 1
+          fi
+          cat > release-notes.md <<'NOTES'
+          # AzimuthRPC Discord Log Upload Test 1
+
+          This is a **test pre-release**, not the official v1.0.0. It is built from PR #8 and contains the new standalone tray menu action: **Send logs to Discord...**
+
+          - Manual opt-in only; no automatic upload.
+          - Shows a read-only preview and requires explicit confirmation.
+          - Sends selected recent diagnostics with common credential and Windows profile redaction.
+          - Uses a rate-limited HTTPS relay; no Discord webhook credentials embedded in the EXE.
+          - You can still use the local Open log folder command.
+
+          Known limits: the FH2ML native DLL has no tray UI. Network delivery to Discord needs a live user test. This standalone test build does not include pending PR #5 car-detection changes; it has the regular v0.9.9 car reader.
+
+          Source: https://github.com/Refilewski/Azimuth-RPC/pull/8
+          NOTES
+          gh release create "$tag" artifacts/AzimuthRPC.exe \
+            --repo "$GITHUB_REPOSITORY" \
+            --target 5312a3c18bd8383ecca7a4cb6480e731ce791fb3 \
+            --title 'AzimuthRPC 0.9.9 — Discord Log Upload TEST 1' \
+            --notes-file release-notes.md \
+            --prerelease \
+            --latest=false
