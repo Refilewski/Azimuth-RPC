@@ -102,3 +102,57 @@ from `GetGameModule()`. It does not scan the process address space for the game.
 
 The vendored FH2ML SDK header is licensed separately under MIT; see
 `fh2ml-sdk/LICENSE`.
+
+## Experimental current-car detection (Extra Options method)
+
+This development-only build has an **opt-in, in-process** vehicle probe based on
+[RokkuDayo's Extra Options](https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions)
+`GetLocalPlayer -> GetPlayerCar` design. The known FH2 1.0.0.64 RVAs are:
+
+- `PlayerManager` root: `0x34ABA60`
+- `GetLocalPlayer`: `0x21E0C0`
+- `GetPlayerCar`: `0x2DA060`
+- expected car-object vtable: `0x2C5CB80`
+- observed numeric model ID: `car + 0x118`
+
+This uses **game functions** on AzimuthRPC's existing worker thread.
+Their thread-safety has **not** been validated. The feature is disabled by
+default and is **not a production car-detection fix**. Do not recommend it
+to general users until live behavior has been verified. It does not patch
+the Extra Options vehicle-update hook or any game code.
+
+For developer-controlled testing only, set the following environment
+variable *before launching Azimuth/FH2ML*:
+
+```powershell
+$env:AZIMUTH_RPC_EXPERIMENTAL_CAR_OBJECT = '1'
+# Launch Azimuth from the same shell so the environment is inherited.
+```
+
+Unset it or set a different value to revert to the previous car reader.
+
+**Fail-closed rules:** accept only the supported FH2 PE, validate the
+player-car vtable and pointer, read the numeric ID with a guarded read,
+release the owned car reference via the verified vtable method, and stop
+probing for the session on unsafe release, unexpected vtable or a caught
+access violation. No stale model name is recycled when the local player
+has no car. A valid numeric ID can provide fallback presence
+`Vehicle model #1234` if the AudioEngine text cannot be decoded.
+When two consecutive samples report the same model ID and a valid
+AudioEngine name, the matching friendly name is remembered in memory
+for later failed string reads. This is **learned from runtime observation**,
+not an authoritative numeric-ID-to-name database; it can be wrong if
+the text field lags a vehicle change.
+
+Watch the log for `Local car object: ok model-id=...` and compare it
+with the actual selected car before and after several garage, free-roam,
+Extra Options and race transitions. Report crashes, wrong car names,
+unreleased references, or logs showing `fault`, `unsafe-release`,
+`invalid-vtable`; leave the feature OFF if anything looks wrong.
+The probe does not exist in the standalone C# EXE because the standalone
+process cannot safely call these in-process game methods.
+
+**Research to finish:** confirm on the game thread that the car getter
+lifetime and field `car + 0x118` are valid, add a proper host game-thread
+callback if FH2ML grows one, and validate a numeric-ID-to-`MediaName`
+source. Until then, do not merge this branch into a production release.
