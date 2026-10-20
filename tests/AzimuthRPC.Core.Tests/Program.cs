@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Globalization;
 using System.Numerics;
 using System.Text.Json;
+using System.Text;
 using AzimuthRPC;
 using AzimuthRPC.Tests;
 
@@ -63,6 +64,133 @@ foreach (var capture in captures)
         Check(!reader.Capture(gameBase, true).Attached, "Changing root published a mixed snapshot");
     });
 }
+Test("Car IDs survive heap string / inline changes and never reuse stale IDs", () =>
+{
+    var memory = new FixtureMemory();
+    var fixture = captures.First(c => c.Label == "free-roam-stopped");
+    foreach (var block in fixture.Memory()) memory.Blocks.Add(block.Key, block.Value);
+    var audio = memory.Blocks[SyntheticFixture.Audio];
+    var reader = new GameSnapshotReader(memory);
+    const ulong heapA = 0x7500000000, heapB = 0x7600000000;
+
+    void PutHeap(string id, ulong address)
+    {
+        Check(id.Length >= 16 && id.Length <= 127);
+        audio.AsSpan(0x278, 64).Clear();
+        BinaryPrimitives.WriteUInt64LittleEndian(audio.AsSpan(0x278), address);
+        BinaryPrimitives.WriteUInt64LittleEndian(audio.AsSpan(0x288), (ulong)id.Length);
+        BinaryPrimitives.WriteUInt64LittleEndian(audio.AsSpan(0x290), (ulong)Math.Max(31, id.Length));
+        memory.Blocks[address] = Encoding.ASCII.GetBytes(id + "\0");
+    }
+    void PutShort(string id)
+    {
+        Check(id.Length >= 5 && id.Length <= 15);
+        audio.AsSpan(0x278, 64).Clear();
+        Encoding.ASCII.GetBytes(id + "\0").CopyTo(audio, 0x278);
+        BinaryPrimitives.WriteUInt64LittleEndian(audio.AsSpan(0x288), (ulong)id.Length);
+        BinaryPrimitives.WriteUInt64LittleEndian(audio.AsSpan(0x290), 15);
+    }
+
+    PutHeap("HON_CivicTypeR_2015", heapA);
+    var first = reader.Capture(SyntheticFixture.GameBase, true);
+    Check(first.Car.RawId == "HON_CivicTypeR_2015" && first.CarProbeStatus == "ok-heap",
+        "Long MSVC string should resolve via guarded heap pointer");
+
+    PutHeap("BMW_M3Coupe_2010", heapB);
+    var switched = reader.Capture(SyntheticFixture.GameBase, true);
+    Check(switched.Car.RawId == "BMW_M3Coupe_2010" && switched.CarProbeStatus == "ok-heap",
+        "Second long car should replace first");
+
+    PutShort("TOY_SupraRZ_98");
+    var shortCar = reader.Capture(SyntheticFixture.GameBase, true);
+    Check(shortCar.Car.RawId == "TOY_SupraRZ_98" && shortCar.CarProbeStatus == "ok",
+        "Short car should switch back to inline encoding");
+
+    PutHeap("HON_CivicTypeR_2015", heapA);
+    memory.Blocks.Remove(heapA);
+    var unreadable = reader.Capture(SyntheticFixture.GameBase, true);
+    Check(unreadable.Attached && unreadable.Car.RawId is null && unreadable.CarProbeStatus == "heap-unreadable",
+        "Unreadable heap must not reuse a previous valid car");
+
+    PutHeap("HON_CivicTypeR_2015", heapA);
+    memory.Blocks[heapA][0] = (byte)'!';
+    var malformed = reader.Capture(SyntheticFixture.GameBase, true);
+    Check(malformed.Car.RawId is null && malformed.CarProbeStatus == "heap-invalid-id",
+        "Malformed pointer payload must be rejected");
+
+    PutHeap("HON_CivicTypeR_2015", heapA);
+    int heapReads = 0;
+    memory.BeforeRead = (address, size) =>
+    {
+        if (address == heapA && ++heapReads == 2)
+            memory.Blocks[heapA][0] = (byte)'!';
+    };
+    var racing = reader.Capture(SyntheticFixture.GameBase, true);
+    Check(racing.Car.RawId is null && racing.CarProbeStatus == "heap-invalid-id" &&
+        racing.CarRetryStatus == "failed:heap-changed->heap-invalid-id",
+        "A changed heap that becomes invalid must fail closed after retry");
+});
+
+Test("Invalid car ID is retried exactly once using a new full snapshot", () =>
+{
+    var memory = new FixtureMemory();
+    var fixture = captures.First(c => c.Label == "free-roam-stopped");
+    foreach (var block in fixture.Memory()) memory.Blocks.Add(block.Key, block.Value);
+    var audio = memory.Blocks[SyntheticFixture.Audio];
+    var reader = new GameSnapshotReader(memory);
+    void WriteCar(string id)
+    {
+        audio.AsSpan(0x278, 64).Clear();
+        Encoding.ASCII.GetBytes(id + "\0").CopyTo(audio, 0x278);
+    }
+
+    WriteCar("BAD!_model_2026");
+    int rawReads = 0;
+    memory.BeforeRead = (address, size) =>
+    {
+        if (address == SyntheticFixture.Audio && size == 0x2C0 && ++rawReads == 2)
+            WriteCar("TOY_SupraRZ_98");
+    };
+    var recovered = reader.Capture(SyntheticFixture.GameBase, true);
+    Check(rawReads == 2, "Expected exactly one fresh retry for invalid-character");
+    Check(recovered.Car.RawId == "TOY_SupraRZ_98" && recovered.CarProbeStatus == "ok");
+    Check(recovered.CarRetryStatus == "recovered:invalid-character->ok");
+
+    WriteCar("BAD!_model_2026");
+    rawReads = 0;
+    memory.BeforeRead = (address, size) =>
+    {
+        if (address == SyntheticFixture.Audio && size == 0x2C0) rawReads++;
+    };
+    var rejected = reader.Capture(SyntheticFixture.GameBase, true);
+    Check(rawReads == 2, "Persistent invalid ID must not cause unbounded rescanning");
+    Check(rejected.Attached && rejected.Car.RawId is null && rejected.Car.DisplayName is null);
+    Check(rejected.CarProbeStatus == "invalid-character");
+    Check(rejected.CarRetryStatus == "failed:invalid-character->invalid-character");
+});
+
+Test("Changing an inline car during sampling recovers without a stale result", () =>
+{
+    var memory = new FixtureMemory();
+    var fixture = captures.First(c => c.Label == "free-roam-stopped");
+    foreach (var block in fixture.Memory()) memory.Blocks.Add(block.Key, block.Value);
+    var audio = memory.Blocks[SyntheticFixture.Audio];
+    var reader = new GameSnapshotReader(memory);
+    audio.AsSpan(0x278, 64).Clear();
+    Encoding.ASCII.GetBytes("TOY_SupraRZ_98\0").CopyTo(audio, 0x278);
+    int fieldReads = 0;
+    memory.BeforeRead = (address, size) =>
+    {
+        if (address != SyntheticFixture.Audio + 0x278 || size != 32 || ++fieldReads != 1) return;
+        audio.AsSpan(0x278, 64).Clear();
+        Encoding.ASCII.GetBytes("LAM_Huracan_15\0").CopyTo(audio, 0x278);
+    };
+    var recovered = reader.Capture(SyntheticFixture.GameBase, true);
+    Check(fieldReads == 2, "Second car read should use a fresh memory snapshot");
+    Check(recovered.Car.RawId == "LAM_Huracan_15");
+    Check(recovered.CarRetryStatus == "recovered:inline-changed->ok");
+});
+
 Test("Unsupported and overflowing bases fail without reads", () =>
 {
     using var memory = new FixtureMemory(); var reader = new GameSnapshotReader(memory);
