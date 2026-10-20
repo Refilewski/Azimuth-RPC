@@ -152,7 +152,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             ? $"PID={status.ProcessId}; UiMode={status.Game.UiMode}; Activity={status.Game.Activity}; " +
               $"HooksInstalled={status.Game.Hooks.Installed}; TelemetryActive={status.Game.Hooks.Active}; " +
               $"EventContext={status.Game.Hooks.EventContext?.ToString() ?? "none"}; " +
-              $"CarProbe={status.Game.CarProbeStatus}; CarId={status.Game.Car.RawId ?? "none"}"
+              $"CarProbe={status.Game.CarProbeStatus}; CarRetry={status.Game.CarRetryStatus}; CarId={status.Game.Car.RawId ?? "none"}"
             : $"PID={status.ProcessId}; Game not attached; Reason={status.Game.Error ?? "unknown"}";
 
         if (diagnostics != _lastDiagnosticContext)
