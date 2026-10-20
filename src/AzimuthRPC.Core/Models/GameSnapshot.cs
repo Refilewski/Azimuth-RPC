@@ -23,6 +23,8 @@ public sealed record GameSnapshot
     public CarState Car { get; init; } = new();
     // Diagnostic only: classification of the car ID field, no raw heap bytes.
     public string CarProbeStatus { get; init; } = "Not sampled";
+    // Standalone: shows whether a fresh one-shot probe recovered a transient ID.
+    public string CarRetryStatus { get; init; } = "not-needed";
     public VehicleState Vehicle { get; init; } = new();
     public UiMode UiMode { get; init; }
     public GameActivity Activity { get; init; }
