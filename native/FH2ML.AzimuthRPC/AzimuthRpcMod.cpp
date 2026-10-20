@@ -41,7 +41,7 @@ constexpr std::uintptr_t kSimulationManagerVtableRva = 0x02C5FD70ull;
 constexpr std::size_t kCarIdOffset = 0x278;
 constexpr std::size_t kCarIdBytes = 64;
 constexpr char kDiscordApplicationId[] = "1445162899315363924";
-constexpr char kVersion[] = "0.9.9";
+constexpr char kVersion[] = "1.0.0";
 constexpr DWORD kDiscordReconnectMs = 5000;
 constexpr DWORD kPresenceUpdateMs = 4000;
 constexpr LONGLONG kMaxLogBytes = 2ll * 1024ll * 1024ll;
@@ -429,52 +429,113 @@ std::string AsciiBytes(const std::uint8_t* data, const std::size_t size)
     return result;
 }
 
-bool ReadCarId(const std::uint8_t* raw, std::string& value, std::string& reason)
+bool ReadCarId(const std::uint8_t* raw, const std::uintptr_t audio,
+               std::string& value, std::string& reason)
 {
     value.clear();
     reason.clear();
+    const std::uint8_t* field = raw + kCarIdOffset;
 
-    std::size_t length = 0;
-    while (length < kCarIdBytes && raw[kCarIdOffset + length] != 0)
-        ++length;
+    // Candidate MSVC std::string with a heap-backed buffer for IDs longer
+    // than 15 bytes. Short IDs use the existing inline ASCII decoder.
+    // This guarded layout is not yet live-validated across mod combinations.
+    std::uint64_t pointer = 0, length = 0, capacity = 0;
+    std::memcpy(&pointer, field, sizeof(pointer));
+    std::memcpy(&length, field + 16, sizeof(length));
+    std::memcpy(&capacity, field + 24, sizeof(capacity));
+    if (length >= 16 && length <= 127 && capacity >= length && capacity <= 4096)
+    {
+        if (!IsPointer(static_cast<std::uintptr_t>(pointer)))
+        {
+            reason = "heap-invalid-pointer";
+            return false;
+        }
 
-    if (length == 0)
+        std::array<std::uint8_t, 128> first{}, second{};
+        std::array<std::uint8_t, 32> fieldAfter{};
+        const std::size_t count = static_cast<std::size_t>(length) + 1;
+        if (!ReadBytes(static_cast<std::uintptr_t>(pointer), first.data(), count) ||
+            !ReadBytes(static_cast<std::uintptr_t>(pointer), second.data(), count))
+        {
+            reason = "heap-unreadable";
+            return false;
+        }
+        if (!ReadBytes(audio + kCarIdOffset, fieldAfter.data(), fieldAfter.size()) ||
+            std::memcmp(field, fieldAfter.data(), fieldAfter.size()) != 0 ||
+            std::memcmp(first.data(), second.data(), count) != 0)
+        {
+            reason = "heap-changed";
+            return false;
+        }
+        if (first[static_cast<std::size_t>(length)] != 0)
+        {
+            reason = "heap-unterminated";
+            return false;
+        }
+
+        bool underscore = false;
+        for (std::size_t i = 0; i < static_cast<std::size_t>(length); ++i)
+        {
+            const unsigned char c = first[i];
+            underscore |= c == '_';
+            if (!((c >= 'A' && c <= 'Z') ||
+                  (c >= 'a' && c <= 'z') ||
+                  (c >= '0' && c <= '9') ||
+                  c == '_'))
+            {
+                reason = "heap-invalid-id";
+                return false;
+            }
+        }
+        if (!underscore)
+        {
+            reason = "heap-invalid-id";
+            return false;
+        }
+
+        value.assign(reinterpret_cast<const char*>(first.data()),
+                     static_cast<std::size_t>(length));
+        reason = "ok-heap";
+        return true;
+    }
+
+    std::size_t inlineLength = 0;
+    while (inlineLength < kCarIdBytes && field[inlineLength] != 0)
+        ++inlineLength;
+
+    if (inlineLength == 0)
     {
         reason = "empty";
         return false;
     }
-    if (length < 5)
+    if (inlineLength < 5)
     {
         reason = "too-short";
         return false;
     }
-    if (length >= kCarIdBytes)
+    if (inlineLength >= kCarIdBytes)
     {
         reason = "unterminated";
         return false;
     }
 
-    for (std::size_t i = 0; i < length; ++i)
+    for (std::size_t i = 0; i < inlineLength; ++i)
     {
-        const unsigned char c = raw[kCarIdOffset + i];
+        const unsigned char c = field[i];
         if (!((c >= 'A' && c <= 'Z') ||
               (c >= 'a' && c <= 'z') ||
               (c >= '0' && c <= '9') ||
               c == '_'))
         {
             char detail[64]{};
-            std::snprintf(
-                detail,
-                sizeof(detail),
-                "invalid-char@%zu=0x%02X",
-                i,
-                static_cast<unsigned int>(c));
+            std::snprintf(detail, sizeof(detail), "invalid-char@%zu=0x%02X",
+                          i, static_cast<unsigned int>(c));
             reason = detail;
             return false;
         }
     }
 
-    value.assign(reinterpret_cast<const char*>(raw + kCarIdOffset), length);
+    value.assign(reinterpret_cast<const char*>(field), inlineLength);
     if (value.find('_') == std::string::npos)
     {
         reason = "missing-underscore";
@@ -682,7 +743,7 @@ Snapshot CaptureSnapshot(const std::uintptr_t gameBase)
 
     std::string car;
     std::string carReason;
-    const bool carParsed = ReadCarId(raw.data(), car, carReason);
+    const bool carParsed = ReadCarId(raw.data(), audio, car, carReason);
     if (carParsed)
     {
         snapshot.carRaw = car;

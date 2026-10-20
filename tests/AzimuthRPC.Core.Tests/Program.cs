@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Globalization;
 using System.Numerics;
 using System.Text.Json;
+using System.Text;
 using AzimuthRPC;
 using AzimuthRPC.Tests;
 
@@ -63,6 +64,72 @@ foreach (var capture in captures)
         Check(!reader.Capture(gameBase, true).Attached, "Changing root published a mixed snapshot");
     });
 }
+Test("Car IDs survive heap string / inline changes and never reuse stale IDs", () =>
+{
+    var memory = new FixtureMemory();
+    var fixture = captures.First(c => c.Label == "free-roam-stopped");
+    foreach (var block in fixture.Memory()) memory.Blocks.Add(block.Key, block.Value);
+    var audio = memory.Blocks[SyntheticFixture.Audio];
+    var reader = new GameSnapshotReader(memory);
+    const ulong heapA = 0x7500000000, heapB = 0x7600000000;
+
+    void PutHeap(string id, ulong address)
+    {
+        Check(id.Length >= 16 && id.Length <= 127);
+        audio.AsSpan(0x278, 64).Clear();
+        BinaryPrimitives.WriteUInt64LittleEndian(audio.AsSpan(0x278), address);
+        BinaryPrimitives.WriteUInt64LittleEndian(audio.AsSpan(0x288), (ulong)id.Length);
+        BinaryPrimitives.WriteUInt64LittleEndian(audio.AsSpan(0x290), (ulong)Math.Max(31, id.Length));
+        memory.Blocks[address] = Encoding.ASCII.GetBytes(id + "\0");
+    }
+    void PutShort(string id)
+    {
+        Check(id.Length >= 5 && id.Length <= 15);
+        audio.AsSpan(0x278, 64).Clear();
+        Encoding.ASCII.GetBytes(id + "\0").CopyTo(audio, 0x278);
+        BinaryPrimitives.WriteUInt64LittleEndian(audio.AsSpan(0x288), (ulong)id.Length);
+        BinaryPrimitives.WriteUInt64LittleEndian(audio.AsSpan(0x290), 15);
+    }
+
+    PutHeap("HON_CivicTypeR_2015", heapA);
+    var first = reader.Capture(SyntheticFixture.GameBase, true);
+    Check(first.Car.RawId == "HON_CivicTypeR_2015" && first.CarProbeStatus == "ok-heap",
+        "Long MSVC string should resolve via guarded heap pointer");
+
+    PutHeap("BMW_M3Coupe_2010", heapB);
+    var switched = reader.Capture(SyntheticFixture.GameBase, true);
+    Check(switched.Car.RawId == "BMW_M3Coupe_2010" && switched.CarProbeStatus == "ok-heap",
+        "Second long car should replace first");
+
+    PutShort("TOY_SupraRZ_98");
+    var shortCar = reader.Capture(SyntheticFixture.GameBase, true);
+    Check(shortCar.Car.RawId == "TOY_SupraRZ_98" && shortCar.CarProbeStatus == "ok",
+        "Short car should switch back to inline encoding");
+
+    PutHeap("HON_CivicTypeR_2015", heapA);
+    memory.Blocks.Remove(heapA);
+    var unreadable = reader.Capture(SyntheticFixture.GameBase, true);
+    Check(unreadable.Attached && unreadable.Car.RawId is null && unreadable.CarProbeStatus == "heap-unreadable",
+        "Unreadable heap must not reuse a previous valid car");
+
+    PutHeap("HON_CivicTypeR_2015", heapA);
+    memory.Blocks[heapA][0] = (byte)'!';
+    var malformed = reader.Capture(SyntheticFixture.GameBase, true);
+    Check(malformed.Car.RawId is null && malformed.CarProbeStatus == "heap-invalid-id",
+        "Malformed pointer payload must be rejected");
+
+    PutHeap("HON_CivicTypeR_2015", heapA);
+    int heapReads = 0;
+    memory.BeforeRead = (address, size) =>
+    {
+        if (address == heapA && ++heapReads == 2)
+            memory.Blocks[heapA][0] = (byte)'A';
+    };
+    var racing = reader.Capture(SyntheticFixture.GameBase, true);
+    Check(racing.Car.RawId is null && racing.CarProbeStatus == "heap-changed",
+        "Heap changing during a snapshot must not publish a mixed ID");
+});
+
 Test("Unsupported and overflowing bases fail without reads", () =>
 {
     using var memory = new FixtureMemory(); var reader = new GameSnapshotReader(memory);
