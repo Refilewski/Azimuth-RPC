@@ -123,11 +123,12 @@ Test("Car IDs survive heap string / inline changes and never reuse stale IDs", (
     memory.BeforeRead = (address, size) =>
     {
         if (address == heapA && ++heapReads == 2)
-            memory.Blocks[heapA][0] = (byte)'A';
+            memory.Blocks[heapA][0] = (byte)'!';
     };
     var racing = reader.Capture(SyntheticFixture.GameBase, true);
-    Check(racing.Car.RawId is null && racing.CarProbeStatus == "heap-changed",
-        "Heap changing during a snapshot must not publish a mixed ID");
+    Check(racing.Car.RawId is null && racing.CarProbeStatus == "heap-invalid-id" &&
+        racing.CarRetryStatus == "failed:heap-changed->heap-invalid-id",
+        "A changed heap that becomes invalid must fail closed after retry");
 });
 
 Test("Invalid car ID is retried exactly once using a new full snapshot", () =>
@@ -175,6 +176,8 @@ Test("Changing an inline car during sampling recovers without a stale result", (
     foreach (var block in fixture.Memory()) memory.Blocks.Add(block.Key, block.Value);
     var audio = memory.Blocks[SyntheticFixture.Audio];
     var reader = new GameSnapshotReader(memory);
+    audio.AsSpan(0x278, 64).Clear();
+    Encoding.ASCII.GetBytes("TOY_SupraRZ_98\0").CopyTo(audio, 0x278);
     int fieldReads = 0;
     memory.BeforeRead = (address, size) =>
     {
