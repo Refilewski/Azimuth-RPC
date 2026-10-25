@@ -11,6 +11,7 @@ internal sealed class DebugRuntime : IAsyncDisposable
     private static readonly TimeSpan PresenceMinInterval = TimeSpan.FromSeconds(4);
     private AppConfig _options;
     private readonly CancellationTokenSource _stop = new();
+    private readonly RaceLoadingGracePeriod _raceLoadingGrace = new();
     private Task? _loop;
     private Process? _process;
     private ExternalProcessMemoryReader? _memory;
@@ -46,7 +47,7 @@ internal sealed class DebugRuntime : IAsyncDisposable
             {
                 try { await TickAsync(_stop.Token); }
                 catch (OperationCanceledException) when (_stop.IsCancellationRequested) { break; }
-                catch (Exception e) { _memorySnapshot = GameSnapshot.Unavailable(e.Message); Log?.Invoke(e.Message); Publish(_memorySnapshot); }
+                catch (Exception e) { _raceLoadingGrace.Reset(); _memorySnapshot = GameSnapshot.Unavailable(e.Message); Log?.Invoke(e.Message); Publish(_memorySnapshot); }
             } while (await timer.WaitForNextTickAsync(_stop.Token));
         }
         catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
@@ -54,7 +55,7 @@ internal sealed class DebugRuntime : IAsyncDisposable
     private async Task TickAsync(CancellationToken token)
     {
         var options = Volatile.Read(ref _options); var now = DateTime.UtcNow;
-        if (options.Offline) { Publish(GameSnapshot.Unavailable("Offline debug mode; memory, hooks and Discord disabled")); return; }
+        if (options.Offline) { _raceLoadingGrace.Reset(); Publish(GameSnapshot.Unavailable("Offline debug mode; memory, hooks and Discord disabled")); return; }
         if (_process is not null && Exited(_process)) await DetachAsync();
         if (_process is null && now >= _nextAttach)
         {
@@ -85,7 +86,7 @@ internal sealed class DebugRuntime : IAsyncDisposable
             else { candidate.Dispose(); Log?.Invoke(installed.Status); }
         }
         var telemetry = _hooks?.Read() ?? Fh2TelemetrySample.Unavailable("Telemetry hooks unavailable");
-        var snapshot = GameStateInterpreter.Apply(_memorySnapshot, telemetry, _hooks?.Installed == true);
+        var snapshot = _raceLoadingGrace.Apply(GameStateInterpreter.Apply(_memorySnapshot, telemetry, _hooks?.Installed == true), now);
         var presence = DiscordPresenceBuilder.Build(snapshot, options, _started == default ? now : _started);
         if (_discord is not null && (!_discord.IsConnected || _discordApplicationId != options.ApplicationId)) await DisconnectAsync();
         if (_process is not null && !string.IsNullOrWhiteSpace(options.ApplicationId) && _discord is null && now >= _nextDiscord)
@@ -115,7 +116,7 @@ internal sealed class DebugRuntime : IAsyncDisposable
         var next = new DebugStatus(snapshot, _process is null ? "Waiting for Azimuth" : $"azimuth · PID {_process.Id}", snapshot.Attached ? $"0x{snapshot.GameBase:X} ({(_pe.PreferredImageBase == snapshot.GameBase ? "preferred" : "relocated")})" : snapshot.Error ?? "Not attached", _discordStatus, presence ?? DiscordPresenceBuilder.Build(snapshot, Volatile.Read(ref _options), _started), _process?.Id, _started);
         Volatile.Write(ref _status, next); Changed?.Invoke(next);
     }
-    private void ResetHooks() { _hooks?.Dispose(); _hooks = null; _nextHook = DateTime.MinValue; }
+    private void ResetHooks() { _raceLoadingGrace.Reset(); _hooks?.Dispose(); _hooks = null; _nextHook = DateTime.MinValue; }
     private void ResetMapping() { ResetHooks(); _base = 0; _reader = _memory is null ? null : new(_memory, Fh2MainlandLocationResolver.Instance); _memorySnapshot = GameSnapshot.Unavailable("Mapping invalidated"); }
     private async Task DetachAsync()
     {
