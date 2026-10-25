@@ -76,6 +76,37 @@ Test("Observed live context 2 FreeRoam / 1 Event; normalized rev is not physical
         Check(game.Activity == expected); Check(game.Hooks.NormalizedRev == .13f); Check(game.WorldPresence == WorldPresence.InWorld);
     }
 });
+Test("Brief inactive telemetry does not flicker into Loading Race", () =>
+{
+    var grace = new RaceLoadingGracePeriod();
+    var time = DateTime.UnixEpoch;
+    GameSnapshot Observed(int eventContext, bool active, UiMode ui = UiMode.Unknown) =>
+        GameStateInterpreter.Apply(
+            new GameSnapshot { Attached = true, UiMode = ui },
+            new Fh2TelemetrySample(true, active, null, null, false, false, eventContext, true, "Synthetic"),
+            true);
+
+    Check(grace.Apply(Observed(1, true), time).Activity == GameActivity.Event);
+    var brieflyInactive = grace.Apply(Observed(1, false), time.AddMilliseconds(700));
+    Check(brieflyInactive.Activity == GameActivity.Event, "Brief telemetry gap should retain racing");
+    Check(DiscordPresenceBuilder.Build(brieflyInactive, new PresenceOptions(), time).Details == "Racing");
+    Check(grace.Apply(Observed(1, false), time.AddSeconds(3)).Activity == GameActivity.RaceLoading,
+        "Grace period must expire; do not invent permanent racing");
+    Check(grace.Apply(Observed(1, true), time.AddSeconds(4)).Activity == GameActivity.Event);
+    Check(grace.Apply(Observed(1, false, UiMode.Loading), time.AddSeconds(4.1)).Activity == GameActivity.RaceLoading,
+        "An explicit loading UI must never be masked");
+    Check(grace.Apply(Observed(1, false), time.AddSeconds(4.2)).Activity == GameActivity.RaceLoading,
+        "Confirmed loading must reset the grace timer");
+
+    Check(grace.Apply(Observed(1, true), time.AddSeconds(5)).Activity == GameActivity.Event);
+    Check(grace.Apply(Observed(2, false), time.AddSeconds(5.1)).Activity == GameActivity.FreeRoam);
+    Check(grace.Apply(Observed(1, false), time.AddSeconds(5.2)).Activity == GameActivity.RaceLoading,
+        "Free Roam must cancel previous race activity");
+    Check(grace.Apply(Observed(1, true), time.AddSeconds(6)).Activity == GameActivity.Event);
+    Check(!grace.Apply(GameSnapshot.Unavailable("Game closed"), time.AddSeconds(6.1)).Attached);
+    Check(grace.Apply(Observed(1, false), time.AddSeconds(6.2)).Activity == GameActivity.RaceLoading,
+        "Detach must not leak previous game's race");
+});
 Test("Unavailable memory clears live telemetry and activity", () =>
 {
     var game = GameStateInterpreter.Apply(GameSnapshot.Unavailable("Read failed"), new(true, true, .5f, .2f, true, true, 1, true, "Old"), true);
