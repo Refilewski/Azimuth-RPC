@@ -40,6 +40,12 @@ constexpr std::uintptr_t kGameManagerVtableRva = 0x02C5F8C8ull;
 constexpr std::uintptr_t kSimulationManagerVtableRva = 0x02C5FD70ull;
 
 constexpr std::size_t kCarIdOffset = 0x278;
+// Game layout discovered in community research: VirtualDashboard and
+// Extra Options. The string decoder below is an independent implementation.
+constexpr std::uintptr_t kHudInstructionRva = 0x783E67ull;
+constexpr std::uintptr_t kHudVehicleField = 0xE8ull;
+constexpr std::uintptr_t kVehicleVtableRva = 0x2C5CB80ull;
+constexpr std::uintptr_t kNativeCarNameOffset = 0x350ull;
 constexpr std::size_t kCarIdBytes = 64;
 constexpr char kDiscordApplicationId[] = "1445162899315363924";
 constexpr char kVersion[] = "0.9.10";
@@ -52,6 +58,8 @@ std::atomic<bool> g_started{false};
 std::atomic<bool> g_stop{false};
 const FH2ModApi* g_platformApi = nullptr;
 FH2Mod* g_registeredMod = nullptr;
+std::atomic<std::uintptr_t> g_hudVehicle{0};
+std::atomic<ULONGLONG> g_hudSampleTick{0};
 
 struct Vec3
 {
@@ -536,6 +544,90 @@ bool FindFallbackCar(const std::uintptr_t audio, std::string& car, std::size_t& 
     return true;
 }
 
+bool ReadHudVehicleName(const std::uintptr_t imageBase, std::string& result)
+{
+    const std::uintptr_t vehicle = g_hudVehicle.load(std::memory_order_acquire);
+    const ULONGLONG seen = g_hudSampleTick.load(std::memory_order_acquire);
+    const ULONGLONG now = GetTickCount64();
+    if (!IsPointer(vehicle) || seen == 0 || now < seen || now - seen > 8000)
+        return false;
+
+    std::uintptr_t type = 0;
+    if (!ReadValue(vehicle, type) || type != imageBase + kVehicleVtableRva)
+        return false;
+    std::array<std::uint8_t, 32> object{};
+    if (!ReadBytes(vehicle + kNativeCarNameOffset, object.data(), object.size()))
+        return false;
+
+    std::uint64_t count = 0, capacity = 0;
+    std::memcpy(&count, object.data() + 16, 8);
+    std::memcpy(&capacity, object.data() + 24, 8);
+    if (count < 5 || count >= 64 || capacity < count || capacity > 4096)
+        return false;
+    std::array<std::uint8_t, 64> bytes{};
+    if (capacity < 16)
+    {
+        if (count > 15) return false;
+        std::memcpy(bytes.data(), object.data(), static_cast<std::size_t>(count));
+    }
+    else
+    {
+        std::uintptr_t ptr = 0;
+        std::memcpy(&ptr, object.data(), 8);
+        if (!IsPointer(ptr) ||
+            !ReadBytes(ptr, bytes.data(), static_cast<std::size_t>(count) + 1) ||
+            bytes[static_cast<std::size_t>(count)] != 0)
+            return false;
+    }
+    std::string id, why;
+    if (!ReadCarId(bytes.data(), id, why) || id.size() != count)
+        return false;
+    result = std::move(id);
+    return true;
+}
+
+// Very short hook: only capture the HUD vehicle pointer. Read the name later,
+// on our own thread, after revalidating the vehicle type and string layout.
+void CaptureHudVehicle(FH2Context* ctx, void*)
+{
+    if (!ctx || !IsPointer(static_cast<std::uintptr_t>(ctx->rdi)))
+        return;
+    std::uintptr_t car = 0;
+    if (!ReadValue(static_cast<std::uintptr_t>(ctx->rdi) + kHudVehicleField, car) ||
+        !IsPointer(car))
+        return;
+    g_hudVehicle.store(car, std::memory_order_release);
+    g_hudSampleTick.store(GetTickCount64(), std::memory_order_release);
+}
+
+void InstallHudVehicleHook(const std::uintptr_t imageBase)
+{
+    const FH2ModApi* api = g_platformApi;
+    if (!api || api->api_version < 7 ||
+        api->size < offsetof(FH2ModApi, hook_instruction) + sizeof(api->hook_instruction) ||
+        !api->wait_for_code || !api->hook_instruction || !api->enable_hooks ||
+        !g_registeredMod)
+    {
+        Trace("HUD car hook unsupported; original AudioEngine source retained");
+        return;
+    }
+    // Platform coordinates installation with other mods and Extra Options.
+    if (reinterpret_cast<std::uintptr_t>(api->wait_for_code(30000)) != imageBase)
+    {
+        Trace("HUD car hook unavailable: game code not ready");
+        return;
+    }
+    FH2Hook* hook = api->hook_instruction(
+        g_registeredMod, "AzimuthRPC: active car from HUD",
+        reinterpret_cast<void*>(imageBase + kHudInstructionRva), CaptureHudVehicle, nullptr);
+    if (!hook || !api->enable_hooks(g_registeredMod, hook))
+    {
+        Trace("HUD car hook declined by platform; original source retained");
+        return;
+    }
+    Trace("HUD car hook installed (car name at vehicle+0x350)");
+}
+
 bool BytesEqual(const std::uint8_t* data, const std::size_t offset, const char* text)
 {
     const std::size_t length = std::strlen(text) + 1;
@@ -743,6 +835,15 @@ Snapshot CaptureSnapshot(const std::uintptr_t gameBase)
             std::snprintf(status, sizeof(status), "fallback@0x%zX", recoveredAt);
             carReason = status;
         }
+    }
+    // The current HUD vehicle is authoritative when freshly observed.
+    // Keep AudioEngine (and its bounded recovery) as the compatibility path.
+    std::string observedCar;
+    if (ReadHudVehicleName(gameBase, observedCar))
+    {
+        car = std::move(observedCar);
+        carParsed = true;
+        carReason = "hud-car+0x350";
     }
     if (carParsed)
     {
@@ -1185,6 +1286,7 @@ DWORD WINAPI RpcThread(LPVOID)
     ULONGLONG lastPresenceUpdate = 0;
     std::uint64_t nonce = 0;
     std::string lastFingerprint;
+    bool hudHookAttempted = false;
     const std::int64_t sessionStart =
         static_cast<std::int64_t>(std::time(nullptr));
 
@@ -1210,6 +1312,12 @@ DWORD WINAPI RpcThread(LPVOID)
                 "FH2 Mod Platform game module acquired at 0x%llX",
                 static_cast<unsigned long long>(gameBase));
             Trace(message);
+        }
+
+        if (!hudHookAttempted)
+        {
+            hudHookAttempted = true;
+            InstallHudVehicleHook(gameBase);
         }
 
         const ULONGLONG now = GetTickCount64();
