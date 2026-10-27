@@ -477,7 +477,7 @@ bool ReadCarId(const std::uint8_t* raw, std::string& value, std::string& reason,
         }
     }
 
-    value.assign(reinterpret_cast<const char*>(raw + kCarIdOffset), length);
+    value.assign(reinterpret_cast<const char*>(raw + offset), length);
     if (value.find('_') == std::string::npos)
     {
         reason = "missing-underscore";
