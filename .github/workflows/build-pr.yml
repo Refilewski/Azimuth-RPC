@@ -82,7 +82,7 @@ jobs:
           "VERSION=$version" >> $env:GITHUB_ENV
           "ARTIFACT_DIR=artifacts/AzimuthRPC-$version-win-x64" >> $env:GITHUB_ENV
           "MOD_VERSION=$modVersion" >> $env:GITHUB_ENV
-          "MOD_ARTIFACT_DIR=artifacts/FH2ML-AzimuthRPC-$modVersion" >> $env:GITHUB_ENV
+          "MOD_ARTIFACT_DIR=artifacts/FH2ModPlatform-AzimuthRPC-$modVersion" >> $env:GITHUB_ENV
           "version=$version" >> $env:GITHUB_OUTPUT
           "mod_version=$modVersion" >> $env:GITHUB_OUTPUT
 
@@ -90,7 +90,7 @@ jobs:
         shell: pwsh
         run: ./publish.ps1
 
-      - name: Build FH2ML DLL
+      - name: Build FH2 Mod Platform DLL
         shell: pwsh
         run: ./native/FH2ML.AzimuthRPC/build.ps1
 
@@ -98,11 +98,11 @@ jobs:
         shell: pwsh
         run: |
           $exe = Join-Path $env:ARTIFACT_DIR 'AzimuthRPC.exe'
-          $dll = Join-Path $env:MOD_ARTIFACT_DIR 'AzimuthRPC.dll'
-          $manifest = Join-Path $env:MOD_ARTIFACT_DIR 'mod.json'
+          $dll = Join-Path $env:MOD_ARTIFACT_DIR 'fh2-mods/AzimuthRPC.dll'
+          $platformDll = Join-Path $env:MOD_ARTIFACT_DIR 'd3dcompiler_47.dll'
           if (-not (Test-Path $exe)) { throw "Missing $exe" }
           if (-not (Test-Path $dll)) { throw "Missing $dll" }
-          if (-not (Test-Path $manifest)) { throw "Missing $manifest" }
+          if (-not (Test-Path $platformDll)) { throw "Missing $platformDll" }
           foreach ($folder in @($env:ARTIFACT_DIR, $env:MOD_ARTIFACT_DIR)) {
             $license = Join-Path $folder 'LICENSE'
             if (-not (Test-Path $license)) { throw "Missing $license" }
@@ -118,10 +118,10 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Upload FH2ML DLL artifact
+      - name: Upload FH2 Mod Platform DLL artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FH2ML-AzimuthRPC-${{ env.MOD_VERSION }}
+          name: FH2ModPlatform-AzimuthRPC-${{ env.MOD_VERSION }}
           path: ${{ env.MOD_ARTIFACT_DIR }}
           if-no-files-found: error
           retention-days: 30
@@ -182,14 +182,14 @@ jobs:
         if: steps.release_check.outputs.exists != 'true'
         uses: actions/download-artifact@v4
         with:
-          name: FH2ML-AzimuthRPC-${{ needs.build.outputs.mod_version }}
+          name: FH2ModPlatform-AzimuthRPC-${{ needs.build.outputs.mod_version }}
           path: release/fh2ml
 
       - name: Package FH2ML ZIP
         if: steps.release_check.outputs.exists != 'true'
         shell: pwsh
         run: |
-          $zip = "release/FH2ML-AzimuthRPC-${{ needs.build.outputs.mod_version }}.zip"
+          $zip = "release/FH2ModPlatform-AzimuthRPC-${{ needs.build.outputs.mod_version }}.zip"
           if (Test-Path $zip) { Remove-Item $zip -Force }
           Compress-Archive -Path 'release/fh2ml/*' -DestinationPath $zip -CompressionLevel Optimal
           if (-not (Test-Path $zip)) { throw "Missing $zip" }
@@ -204,8 +204,8 @@ jobs:
         run: |
           $tag = "v$env:VERSION"
           $exe = 'release/standalone/AzimuthRPC.exe'
-          $dll = 'release/fh2ml/AzimuthRPC.dll'
-          $zip = "release/FH2ML-AzimuthRPC-$env:MOD_VERSION.zip"
+          $dll = 'release/fh2ml/fh2-mods/AzimuthRPC.dll'
+          $zip = "release/FH2ModPlatform-AzimuthRPC-$env:MOD_VERSION.zip"
           $license = 'release/standalone/LICENSE'
 
           gh release create $tag $exe $dll $zip $license `

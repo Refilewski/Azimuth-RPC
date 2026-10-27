@@ -30,6 +30,17 @@ public sealed class GameSnapshotReader
         if (raw is null) return GameSnapshot.Unavailable("Audio/vehicle snapshot read failed");
         var ui = UiModeReader.ReadSnapshot(gameBase, true, frame.Read);
         string? car = ReadCar(raw.AsSpan(0x278, 64), out string carProbeStatus);
+        if (car is null)
+        {
+            // Bounded recovery within the same validated AudioEngine object.
+            // Keep the confirmed field as the primary source.
+            var extended = frame.Read(audio, 0x600);
+            if (extended is not null && TryFindFallbackCar(extended, out var recovered, out int recoveredAt))
+            {
+                car = recovered;
+                carProbeStatus = $"fallback@0x{recoveredAt:X}";
+            }
+        }
         if (car != _lastCarId) { _lastCarId = car; _displayName = FriendlyCarName(car); }
         float mph = F32(raw, 0x90);
         float? speed = float.IsFinite(mph) && mph >= 0 && mph <= 400 ? mph : null;
@@ -106,6 +117,49 @@ public sealed class GameSnapshotReader
         status = "ok";
         return value;
     }
+
+    private static bool TryFindFallbackCar(ReadOnlySpan<byte> raw, out string? car, out int offset)
+    {
+        car = null;
+        offset = 0;
+        for (int at = 0x200; at <= 0x500; at++)
+        {
+            if (raw[at - 1] != 0)
+                continue;
+            string? candidate = ReadCar(raw.Slice(at, 64), out _);
+            if (candidate is null || !LooksLikeFallbackCarId(candidate))
+                continue;
+            if (car is not null && car != candidate)
+            {
+                car = null;
+                return false;
+            }
+            if (car is null)
+            {
+                car = candidate;
+                offset = at;
+            }
+        }
+        return car is not null;
+    }
+
+    private static bool LooksLikeFallbackCarId(string id)
+    {
+        int first = id.IndexOf('_'), last = id.LastIndexOf('_');
+        if (first < 2 || first > 5 || last <= first + 1)
+            return false;
+        for (int i = 0; i < first; i++)
+            if (id[i] < 'A' || id[i] > 'Z')
+                return false;
+        int yearLength = id.Length - last - 1;
+        if (yearLength != 2 && yearLength != 4)
+            return false;
+        for (int i = last + 1; i < id.Length; i++)
+            if (id[i] < '0' || id[i] > '9')
+                return false;
+        return true;
+    }
+
     private static string? FriendlyCarName(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw))

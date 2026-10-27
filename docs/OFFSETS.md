@@ -15,6 +15,17 @@ Only **FH2 Xbox One1.0.0.64**. Image RVAs are added to dynamically resolved Game
 
 Mapped headers must match file identity. Preferred base is tried first, then eligible image/private allocation bases. No stable heap address is assumed.
 
+## Current vehicle from HUD (new native FH2 Mod Platform path)
+
+**SOURCE-CONFIRMED / NEEDS LIVE AZIMUTH 1.0.2 VALIDATION** (based on public implementations, not our own live capture):
+- HUD speedometer instruction `GameBase+0x783E67`: an FH2 Mod Platform instruction hook sees the HUD object in RDI.
+- `HUD+0xE8`: pointer to the car currently displayed by the HUD.
+- `Car+0x0` vtable: compare to `GameBase+0x2C5CB80` (player-car type from Extra Options).
+- `Car+0x350`: native narrow car media-name string. 16-byte inline storage for short strings, heap pointer for longer strings; object length at +0x10 and capacity at +0x18.
+- The platform-native DLL uses this read as primary when the hook is fresh (8-second window), validates type/string and falls back to the legacy AudioEngine path when unavailable. The EXE has no platform HUD hook; it retains its current AudioEngine mechanism.
+
+Sources: [VirtualDashboard](https://github.com/suderek22/FH2_VirtualDashboard/blob/main/VirtualDashboard.cpp#L32-L56) (HUD hook + car string); [Extra Options](https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions/blob/main/game_addresses.h) (player-car vtable). Both projects are GPL-3.0; only observed offsets/data layouts are documented here, not their source code.
+
 ## Vehicle fields
 
 | Name | Offset; root | Type / meaning | Status; discovery; confidence | Guards / notes |

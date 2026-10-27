@@ -1,104 +1,35 @@
-# AzimuthRPC as an FH2ML native mod
+# AzimuthRPC — FH2 Mod Platform
 
-This directory builds the native x64 `AzimuthRPC.dll` intended to be loaded by FH2ML as a manifest mod.
+Native Windows x64 Discord Rich Presence plugin for Trinculo54's FH2 Mod Platform 2.7.3+. It exports `fh2mod_init`, registers itself with the platform and uses platform-provided logging and the mapped FH2 base address. It is independent of the .NET runtime and does not patch gameplay.
 
-The implementation is deliberately native C++ and does **not** host the .NET runtime inside Azimuth.
+## Build and install
 
-## Current runtime
-
-The DLL:
-
-- exports `FH2ML_Initialize`;
-- starts a worker thread after initialization instead of doing RPC work in `DllMain`;
-- validates the mapped FH2 Xbox One 1.0.0.64 PE identity;
-- reads live car, speed, XYZ and velocity from the known game structures;
-- reproduces the current Hub / Garage / Loading / Pause / Photo Mode / World Map detection;
-- resolves mainland macro locations from live coordinates using the current anchor/polygon resolver;
-- connects directly to Discord's local `discord-ipc-*` named pipes;
-- publishes car and rounded speed while the conservative in-world fallback is positive;
-- writes a capped diagnostic log for public bug reports.
-
-No gameplay patch or hook is installed by this runtime. Event-vs-free-roam telemetry and native road/region discovery are intentionally still separate research work.
-
-## Diagnostics
-
-The native mod writes (paste this path into Windows Explorer):
-
-```text
-%LOCALAPPDATA%\AzimuthRPC\logs\AzimuthRPC.log
-```
-
-The log starts as soon as `FH2ML_Initialize` is called, including early failures caused by an incompatible FH2ML API or unsupported FH2 game image. If there is no log, confirm the mod DLL was loaded and its initializer invoked.
-
-The log rotates after roughly 2 MiB, keeping the previous log as `AzimuthRPC.log.1`.
-
-At startup it records the AzimuthRPC version, loaded module names, the detected FH2 image base and Discord IPC connection state. When the car probe changes it also records:
-
-- parser result (`ok`, `empty`, `too-short`, `unterminated`, `missing-underscore`, or the invalid character position);
-- the `AudioEngine` pointer and `+0x278` car-field offset;
-- current UI mode, speed and XYZ when available;
-- 64 bytes from the car field as printable ASCII and hex.
-
-If RPC works but the current car is missing, reproduce the issue and attach a reviewed `AzimuthRPC.log`. Inspect/redact personal information first: logs include module filenames, memory probe bytes and runtime telemetry. The most useful entry begins with `Car probe:`.
-
-Only module file names are logged, not full module paths.
-
-## FH2ML ABI note
-
-`FH2ML_Initialize` receives the FH2ML host API pointer. The exact shared `sdk/FH2ML.h` is not vendored in this repository yet, so the current version treats that pointer as opaque instead of inventing an ABI layout. Once the real header is shared between the projects, host logging/registration can be wired without changing the runtime design.
-
-## Build
-
-From the repository root on Windows with Visual Studio Build Tools and CMake:
+Build on Windows x64 with Visual Studio Build Tools and CMake:
 
 ```powershell
 ./native/FH2ML.AzimuthRPC/build.ps1
 ```
 
-Output:
-
-```text
-artifacts/FH2ML-AzimuthRPC-0.9.1/
-  AzimuthRPC.dll
-  mod.json
-  README.md
-  LICENSE
-```
-
-The build script reads the package version from `mod.json`, so future versions do not require a hardcoded output path change.
-
-## Install
-
-Copy the packaged folder as one manifest-owned mod, for example:
+The script downloads the official FH2 Mod Platform 2.7.3 distribution for packaging. Extract the contents of `FH2ModPlatform-AzimuthRPC-<version>` next to `azimuth.exe`:
 
 ```text
 Azimuth/
-  mods/
-    azimuth-rpc/
-      AzimuthRPC.dll
-      mod.json
-      README.md
+  azimuth.exe
+  d3dcompiler_47.dll
+  fh2-mods/
+    AzimuthRPC.dll
 ```
 
-`mod.json` is enabled by default and currently uses priority `500` with no dependency or ordering edges.
+Keep a newer official `d3dcompiler_47.dll` if another mod already installed it. The included `LICENSE`, `LICENSE-FH2ModPlatform.txt` and `LICENSE-MinHook.txt` are important redistributable notices. `mod.json` is internal version metadata only; it is not shipped or consumed by FH2 Mod Platform.
 
-## Rich Presence behavior
+## Operation and diagnostics
 
-AzimuthRPC omits Discord's second `state` line when it has no useful value to show. For example, `Horizon Hub` is shown on its own if the car cannot currently be resolved instead of adding a redundant `Forza Horizon 2 via AzimuthRPC` line.
+The platform loads the plugin before the game is mapped. The AzimuthRPC worker waits for a validated FH2 1.0.0.64 image, then polls car, speed, approximate mainland location and game activity and updates Discord IPC.
 
-## Limitations
+- Native log: `%LOCALAPPDATA%\\AzimuthRPC\\logs\\AzimuthRPC.log`
+- Platform load/registration log: `fh2-mods\\platform.log`
+- If the known `AudioEngine+0x278` car ID cannot be parsed, the plugin tests a bounded region of the same object for a **unique** plausible identifier. The log reports `fallback@0x...` when recovery succeeds. Two different plausible IDs cause the fallback to reject the sample rather than guess.
 
-- FH2ML itself is still a development loader and its Azimuth compatibility matrix is not yet fully live-validated.
-- This DLL uses conservative memory-only world-presence logic rather than the standalone debug host's external telemetry hooks.
-- The current location names are macro regions inferred from player coordinates, not a native FH2 road/landmark source.
-- Discord IPC is retried automatically if Discord is not running or restarts.
-- No hot-unload support is attempted.
-## FH2ML Host API integration
+The same guarded fallback exists in standalone EXE. **No live test for Azimuth 1.0.2 is available yet**: neither a new offset nor a guaranteed fix is claimed. Reproduce in a car and check the logged probe status. Review/redact logs before sharing, because they may include module names and telemetry.
 
-The native DLL is built against the vendored FH2ML SDK v1 header in `fh2ml-sdk/`.
-During `FH2ML_Initialize` it validates the host table, registers `azimuth-rpc`,
-mirrors diagnostics through the FH2ML logger, and obtains the mapped FH2 image
-from `GetGameModule()`. It does not scan the process address space for the game.
-
-The vendored FH2ML SDK header is licensed separately under MIT; see
-`fh2ml-sdk/LICENSE`.
+Do not run EXE and DLL simultaneously. Hot unload is not implemented.

@@ -1,5 +1,5 @@
 #include <windows.h>
-#include "FH2ML.h"
+#include "fh2mod.h"
 #include "LocationResolver.h"
 #include <tlhelp32.h>
 
@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cstddef>
 #include <cctype>
 #include <ctime>
 #include <cstdio>
@@ -39,16 +40,26 @@ constexpr std::uintptr_t kGameManagerVtableRva = 0x02C5F8C8ull;
 constexpr std::uintptr_t kSimulationManagerVtableRva = 0x02C5FD70ull;
 
 constexpr std::size_t kCarIdOffset = 0x278;
+// Game layout discovered in community research: VirtualDashboard and
+// Extra Options. The string decoder below is an independent implementation.
+constexpr std::uintptr_t kHudInstructionRva = 0x783E67ull;
+constexpr std::uintptr_t kHudVehicleField = 0xE8ull;
+constexpr std::uintptr_t kVehicleVtableRva = 0x2C5CB80ull;
+constexpr std::uintptr_t kNativeCarNameOffset = 0x350ull;
 constexpr std::size_t kCarIdBytes = 64;
 constexpr char kDiscordApplicationId[] = "1445162899315363924";
-constexpr char kVersion[] = "0.9.9";
+constexpr char kVersion[] = "0.9.10";
+constexpr char kPlatformVersion[] = "2.7.3";
 constexpr DWORD kDiscordReconnectMs = 5000;
 constexpr DWORD kPresenceUpdateMs = 4000;
 constexpr LONGLONG kMaxLogBytes = 2ll * 1024ll * 1024ll;
 
 std::atomic<bool> g_started{false};
 std::atomic<bool> g_stop{false};
-const FH2ML_HostAPI* g_hostApi = nullptr;
+const FH2ModApi* g_platformApi = nullptr;
+FH2Mod* g_registeredMod = nullptr;
+std::atomic<std::uintptr_t> g_hudVehicle{0};
+std::atomic<ULONGLONG> g_hudSampleTick{0};
 
 struct Vec3
 {
@@ -175,8 +186,8 @@ void Trace(const std::string& message)
     OutputDebugStringA(debug.c_str());
     AppendLog(message);
 
-    if (g_hostApi != nullptr && g_hostApi->Log != nullptr)
-        g_hostApi->Log("azimuth-rpc", message.c_str());
+    if (g_platformApi != nullptr && g_registeredMod != nullptr && g_platformApi->log != nullptr)
+        g_platformApi->log(g_registeredMod, message.c_str());
 }
 
 std::string WideToUtf8(const wchar_t* value)
@@ -279,10 +290,10 @@ bool IsSupportedGameImage(const std::uintptr_t base)
 
 std::uintptr_t GetGameBaseFromHost()
 {
-    if (g_hostApi == nullptr || g_hostApi->GetGameModule == nullptr)
+    if (g_platformApi == nullptr || g_platformApi->game_base == nullptr)
         return 0;
 
-    const std::uintptr_t base = g_hostApi->GetGameModule();
+    const std::uintptr_t base = reinterpret_cast<std::uintptr_t>(g_platformApi->game_base());
     return IsSupportedGameImage(base) ? base : 0;
 }
 
@@ -429,13 +440,13 @@ std::string AsciiBytes(const std::uint8_t* data, const std::size_t size)
     return result;
 }
 
-bool ReadCarId(const std::uint8_t* raw, std::string& value, std::string& reason)
+bool ReadCarId(const std::uint8_t* raw, std::string& value, std::string& reason, const std::size_t offset = kCarIdOffset)
 {
     value.clear();
     reason.clear();
 
     std::size_t length = 0;
-    while (length < kCarIdBytes && raw[kCarIdOffset + length] != 0)
+    while (length < kCarIdBytes && raw[offset + length] != 0)
         ++length;
 
     if (length == 0)
@@ -456,7 +467,7 @@ bool ReadCarId(const std::uint8_t* raw, std::string& value, std::string& reason)
 
     for (std::size_t i = 0; i < length; ++i)
     {
-        const unsigned char c = raw[kCarIdOffset + i];
+        const unsigned char c = raw[offset + i];
         if (!((c >= 'A' && c <= 'Z') ||
               (c >= 'a' && c <= 'z') ||
               (c >= '0' && c <= '9') ||
@@ -474,7 +485,7 @@ bool ReadCarId(const std::uint8_t* raw, std::string& value, std::string& reason)
         }
     }
 
-    value.assign(reinterpret_cast<const char*>(raw + kCarIdOffset), length);
+    value.assign(reinterpret_cast<const char*>(raw + offset), length);
     if (value.find('_') == std::string::npos)
     {
         reason = "missing-underscore";
@@ -484,6 +495,137 @@ bool ReadCarId(const std::uint8_t* raw, std::string& value, std::string& reason)
 
     reason = "ok";
     return true;
+}
+
+bool LooksLikeFallbackCarId(const std::string& id)
+{
+    const auto first = id.find('_');
+    const auto last = id.rfind('_');
+    if (first < 2 || first > 5 || last == first || last < first + 2)
+        return false;
+    for (std::size_t i = 0; i < first; ++i)
+        if (id[i] < 'A' || id[i] > 'Z')
+            return false;
+    const auto length = id.size() - last - 1;
+    if (length != 2 && length != 4)
+        return false;
+    for (std::size_t i = last + 1; i < id.size(); ++i)
+        if (id[i] < '0' || id[i] > '9')
+            return false;
+    return true;
+}
+
+// Recover only a single plausible year-suffixed car ID inside the known object.
+bool FindFallbackCar(const std::uintptr_t audio, std::string& car, std::size_t& offset)
+{
+    std::array<std::uint8_t, 0x600> buffer{};
+    if (!ReadBytes(audio, buffer.data(), buffer.size()))
+        return false;
+    std::string found;
+    std::size_t foundAt = 0;
+    for (std::size_t at = 0x200; at <= 0x500; ++at)
+    {
+        if (at > 0 && buffer[at - 1] != 0)
+            continue;
+        std::string candidate, reason;
+        if (!ReadCarId(buffer.data(), candidate, reason, at) || !LooksLikeFallbackCarId(candidate))
+            continue;
+        if (!found.empty() && found != candidate)
+            return false;
+        if (found.empty())
+        {
+            found = candidate;
+            foundAt = at;
+        }
+    }
+    if (found.empty()) return false;
+    car = found;
+    offset = foundAt;
+    return true;
+}
+
+bool ReadHudVehicleName(const std::uintptr_t imageBase, std::string& result)
+{
+    const std::uintptr_t vehicle = g_hudVehicle.load(std::memory_order_acquire);
+    const ULONGLONG seen = g_hudSampleTick.load(std::memory_order_acquire);
+    const ULONGLONG now = GetTickCount64();
+    if (!IsPointer(vehicle) || seen == 0 || now < seen || now - seen > 8000)
+        return false;
+
+    std::uintptr_t type = 0;
+    if (!ReadValue(vehicle, type) || type != imageBase + kVehicleVtableRva)
+        return false;
+    std::array<std::uint8_t, 32> object{};
+    if (!ReadBytes(vehicle + kNativeCarNameOffset, object.data(), object.size()))
+        return false;
+
+    std::uint64_t count = 0, capacity = 0;
+    std::memcpy(&count, object.data() + 16, 8);
+    std::memcpy(&capacity, object.data() + 24, 8);
+    if (count < 5 || count >= 64 || capacity < count || capacity > 4096)
+        return false;
+    std::array<std::uint8_t, 64> bytes{};
+    if (capacity < 16)
+    {
+        if (count > 15) return false;
+        std::memcpy(bytes.data(), object.data(), static_cast<std::size_t>(count));
+    }
+    else
+    {
+        std::uintptr_t ptr = 0;
+        std::memcpy(&ptr, object.data(), 8);
+        if (!IsPointer(ptr) ||
+            !ReadBytes(ptr, bytes.data(), static_cast<std::size_t>(count) + 1) ||
+            bytes[static_cast<std::size_t>(count)] != 0)
+            return false;
+    }
+    std::string id, why;
+    if (!ReadCarId(bytes.data(), id, why) || id.size() != count)
+        return false;
+    result = std::move(id);
+    return true;
+}
+
+// Very short hook: only capture the HUD vehicle pointer. Read the name later,
+// on our own thread, after revalidating the vehicle type and string layout.
+void CaptureHudVehicle(FH2Context* ctx, void*)
+{
+    if (!ctx || !IsPointer(static_cast<std::uintptr_t>(ctx->rdi)))
+        return;
+    std::uintptr_t car = 0;
+    if (!ReadValue(static_cast<std::uintptr_t>(ctx->rdi) + kHudVehicleField, car) ||
+        !IsPointer(car))
+        return;
+    g_hudVehicle.store(car, std::memory_order_release);
+    g_hudSampleTick.store(GetTickCount64(), std::memory_order_release);
+}
+
+void InstallHudVehicleHook(const std::uintptr_t imageBase)
+{
+    const FH2ModApi* api = g_platformApi;
+    if (!api || api->api_version < 7 ||
+        api->size < offsetof(FH2ModApi, hook_instruction) + sizeof(api->hook_instruction) ||
+        !api->wait_for_code || !api->hook_instruction || !api->enable_hooks ||
+        !g_registeredMod)
+    {
+        Trace("HUD car hook unsupported; original AudioEngine source retained");
+        return;
+    }
+    // Platform coordinates installation with other mods and Extra Options.
+    if (reinterpret_cast<std::uintptr_t>(api->wait_for_code(30000)) != imageBase)
+    {
+        Trace("HUD car hook unavailable: game code not ready");
+        return;
+    }
+    FH2Hook* hook = api->hook_instruction(
+        g_registeredMod, "AzimuthRPC: active car from HUD",
+        reinterpret_cast<void*>(imageBase + kHudInstructionRva), CaptureHudVehicle, nullptr);
+    if (!hook || !api->enable_hooks(g_registeredMod, hook))
+    {
+        Trace("HUD car hook declined by platform; original source retained");
+        return;
+    }
+    Trace("HUD car hook installed (car name at vehicle+0x350)");
 }
 
 bool BytesEqual(const std::uint8_t* data, const std::size_t offset, const char* text)
@@ -682,7 +824,27 @@ Snapshot CaptureSnapshot(const std::uintptr_t gameBase)
 
     std::string car;
     std::string carReason;
-    const bool carParsed = ReadCarId(raw.data(), car, carReason);
+    bool carParsed = ReadCarId(raw.data(), car, carReason);
+    if (!carParsed)
+    {
+        std::size_t recoveredAt = 0;
+        if (FindFallbackCar(audio, car, recoveredAt))
+        {
+            carParsed = true;
+            char status[80]{};
+            std::snprintf(status, sizeof(status), "fallback@0x%zX", recoveredAt);
+            carReason = status;
+        }
+    }
+    // The current HUD vehicle is authoritative when freshly observed.
+    // Keep AudioEngine (and its bounded recovery) as the compatibility path.
+    std::string observedCar;
+    if (ReadHudVehicleName(gameBase, observedCar))
+    {
+        car = std::move(observedCar);
+        carParsed = true;
+        carReason = "hud-car+0x350";
+    }
     if (carParsed)
     {
         snapshot.carRaw = car;
@@ -1124,10 +1286,11 @@ DWORD WINAPI RpcThread(LPVOID)
     ULONGLONG lastPresenceUpdate = 0;
     std::uint64_t nonce = 0;
     std::string lastFingerprint;
+    bool hudHookAttempted = false;
     const std::int64_t sessionStart =
         static_cast<std::int64_t>(std::time(nullptr));
 
-    Trace(std::string("AzimuthRPC ") + kVersion + " FH2ML native worker started");
+    Trace(std::string("AzimuthRPC ") + kVersion + " FH2 Mod Platform native worker started");
     Trace("Log file: %LOCALAPPDATA%\\AzimuthRPC\\logs\\AzimuthRPC.log");
     LogLoadedModules();
 
@@ -1146,9 +1309,15 @@ DWORD WINAPI RpcThread(LPVOID)
             std::snprintf(
                 message,
                 sizeof(message),
-                "FH2ML game module acquired at 0x%llX",
+                "FH2 Mod Platform game module acquired at 0x%llX",
                 static_cast<unsigned long long>(gameBase));
             Trace(message);
+        }
+
+        if (!hudHookAttempted)
+        {
+            hudHookAttempted = true;
+            InstallHudVehicleHook(gameBase);
         }
 
         const ULONGLONG now = GetTickCount64();
@@ -1216,103 +1385,61 @@ DWORD WINAPI RpcThread(LPVOID)
     if (discordPipe != INVALID_HANDLE_VALUE)
         CloseHandle(discordPipe);
 
-    Trace("FH2ML native worker stopped");
+    Trace("FH2 Mod Platform native worker stopped");
     return 0;
 }
 } // namespace
 
-extern "C" __declspec(dllexport) int FH2ML_Initialize(const FH2ML_HostAPI* api)
+FH2MOD_EXPORT int fh2mod_init(const FH2ModApi* api)
 {
-    // Log *before* checking the FH2ML ABI. Otherwise an incompatible loader,
-    // missing API callback, or unsupported game image could return silently and
-    // users would have no AzimuthRPC.log to include in a bug report.
-    Trace(std::string("AzimuthRPC ") + kVersion + " FH2ML_Initialize entered");
-
+    Trace(std::string("AzimuthRPC ") + kVersion + " fh2mod_init entered");
     if (api == nullptr)
     {
-        Trace("FH2ML initialization rejected: host API pointer is null");
-        return 0;
-    }
-    if (api->size < sizeof(FH2ML_HostAPI))
-    {
-        char message[160]{};
-        std::snprintf(
-            message,
-            sizeof(message),
-            "FH2ML initialization rejected: host API table too small (got %zu, expected at least %zu)",
-            static_cast<std::size_t>(api->size),
-            sizeof(FH2ML_HostAPI));
-        Trace(message);
-        return 0;
-    }
-    if (api->version != FH2ML_API_VERSION)
-    {
-        char message[160]{};
-        std::snprintf(
-            message,
-            sizeof(message),
-            "FH2ML initialization rejected: API version mismatch (got %u, expected %u)",
-            static_cast<unsigned int>(api->version),
-            static_cast<unsigned int>(FH2ML_API_VERSION));
-        Trace(message);
-        return 0;
-    }
-    if (api->Log == nullptr ||
-        api->RegisterMod == nullptr ||
-        api->GetGameModule == nullptr)
-    {
-        Trace("FH2ML initialization rejected: required Log, RegisterMod or GetGameModule callback missing");
-        return 0;
-    }
-
-    bool expected = false;
-    if (!g_started.compare_exchange_strong(expected, true))
-    {
-        Trace("FH2ML initialization skipped: AzimuthRPC is already running");
+        Trace("FH2 Mod Platform rejected: null API");
         return 1;
     }
-
+    constexpr std::size_t requiredSize = offsetof(FH2ModApi, wait_for_game) + sizeof(api->wait_for_game);
+    if (api->size < requiredSize || api->api_version < 1 ||
+        api->register_mod == nullptr || api->log == nullptr ||
+        api->game_base == nullptr || api->wait_for_game == nullptr)
+    {
+        Trace("FH2 Mod Platform rejected: incomplete API table");
+        return 1;
+    }
+    bool expected = false;
+    if (!g_started.compare_exchange_strong(expected, true))
+        return 0;
     g_stop.store(false, std::memory_order_relaxed);
-    g_hostApi = api;
-
-    if (api->RegisterMod("azimuth-rpc", kVersion) == 0)
+    g_platformApi = api;
+    FH2ModInfo info{};
+    info.size = sizeof(info);
+    info.name = "AzimuthRPC";
+    info.version = kVersion;
+    info.github_repo = "Refilewski/Azimuth-RPC";
+    info.platform_version = kPlatformVersion;
+    info.check_updates = 1;
+    info.description = "Discord Rich Presence for Forza Horizon 2";
+    g_registeredMod = api->register_mod(&info);
+    if (!g_registeredMod)
     {
-        Trace("FH2ML initialization rejected: RegisterMod failed");
-        g_hostApi = nullptr;
+        Trace("FH2 Mod Platform rejected: register_mod failed");
+        g_platformApi = nullptr;
         g_started.store(false, std::memory_order_relaxed);
-        return 0;
+        return 1;
     }
-
-    const std::uintptr_t gameBase = GetGameBaseFromHost();
-    if (gameBase == 0)
-    {
-        Trace("FH2ML initialization rejected: GetGameModule returned no supported FH2 1.0.0.64 image");
-        LogLoadedModules();
-        g_hostApi = nullptr;
-        g_started.store(false, std::memory_order_relaxed);
-        return 0;
-    }
-
-    char registration[160]{};
-    std::snprintf(
-        registration,
-        sizeof(registration),
-        "Registered with FH2ML API v%u; game module=0x%llX",
-        static_cast<unsigned int>(api->version),
-        static_cast<unsigned long long>(gameBase));
-    Trace(registration);
-
+    // Azimuth maps FH2 after platform initialization: worker must wait.
+    Trace("Registered with FH2 Mod Platform; waiting for supported game image");
     HANDLE thread = CreateThread(nullptr, 0, RpcThread, nullptr, 0, nullptr);
-    if (thread == nullptr)
+    if (!thread)
     {
-        Trace("Failed to start FH2ML native RPC worker");
-        g_hostApi = nullptr;
+        Trace("Failed to start native RPC worker");
+        g_registeredMod = nullptr;
+        g_platformApi = nullptr;
         g_started.store(false, std::memory_order_relaxed);
-        return 0;
+        return 1;
     }
-
     CloseHandle(thread);
-    return 1;
+    return 0;
 }
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)

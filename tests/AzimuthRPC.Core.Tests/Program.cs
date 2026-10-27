@@ -63,6 +63,24 @@ foreach (var capture in captures)
         Check(!reader.Capture(gameBase, true).Attached, "Changing root published a mixed snapshot");
     });
 }
+Test("Moved car field recovers uniquely but ambiguity fails closed", () =>
+{
+    using var memory = new FixtureMemory();
+    foreach (var (key, value) in captures[0].Memory())
+        memory.Blocks[key] = value;
+    byte[] audio = memory.Blocks[SyntheticFixture.Audio];
+    Array.Clear(audio, 0x278, 64);
+    System.Text.Encoding.ASCII.GetBytes("TOY_SupraRZ_98\0").CopyTo(audio, 0x360);
+    var reader = new GameSnapshotReader(memory);
+    var recovered = reader.Capture(SyntheticFixture.GameBase, true);
+    Check(recovered.Attached && recovered.Car.RawId == "TOY_SupraRZ_98" &&
+          recovered.CarProbeStatus == "fallback@0x360", "Failed to recover moved car");
+    System.Text.Encoding.ASCII.GetBytes("LAM_Huracan_15\0").CopyTo(audio, 0x420);
+    var ambiguous = reader.Capture(SyntheticFixture.GameBase, true);
+    Check(ambiguous.Attached && ambiguous.Car.RawId is null,
+          "Multiple plausible car IDs must not be guessed");
+});
+
 Test("Unsupported and overflowing bases fail without reads", () =>
 {
     using var memory = new FixtureMemory(); var reader = new GameSnapshotReader(memory);

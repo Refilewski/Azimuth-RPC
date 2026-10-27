@@ -41,49 +41,50 @@ Download the newest build from [GitHub Releases](https://github.com/Refilewski/A
 4. Run `AzimuthRPC.exe`.
 5. AzimuthRPC stays in the system tray and connects automatically when the supported FH2 build is detected.
 
-### FH2ML mod
+### FH2 Mod Platform mod
 
-Download `FH2ML-AzimuthRPC-<version>.zip` from the latest release and extract it as one FH2ML mod:
+Download `FH2ModPlatform-AzimuthRPC-<version>.zip` from the latest release and extract its contents next to `azimuth.exe`:
 
 ```text
 Azimuth/
-  mods/
-    azimuth-rpc/
-      AzimuthRPC.dll
-      mod.json
-      README.md
+  azimuth.exe
+  d3dcompiler_47.dll
+  fh2-mods/
+    AzimuthRPC.dll
 ```
 
-The native mod runs inside Azimuth/FH2ML and talks directly to Discord IPC. Do not run the standalone EXE and FH2ML DLL at the same time, or both may try to update the same Rich Presence.
+The native DLL uses Trinculo54's **FH2 Mod Platform 2.7.3+**, not the earlier FH2ML manifest ABI. The zip ships the official platform loader. If other mods already installed a newer `d3dcompiler_47.dll`, keep the newer version.
+
+The plugin runs in-process, using the platform's game-base service and local Discord IPC. **Do not run the standalone EXE and native DLL together**, because both may update the same Rich Presence.
 
 ## Compatibility
 
 AzimuthRPC currently targets **Forza Horizon 2 Xbox One 1.0.0.64** on Windows x64 through Azimuth. Unknown game builds are rejected instead of using offsets against an unsupported executable.
 
-Compatibility can vary with Azimuth and FH2ML versions or other mods. If something breaks, include your exact setup in the issue report.
+Compatibility can vary with Azimuth and FH2 Mod Platform versions or other mods. If something breaks, include your exact setup in the issue report.
 
 **Linux / Wine support is not available yet.** A Linux Discord IPC path/bridge is being explored.
 
 ## Diagnostics & privacy
 
-Both the standalone EXE and the FH2ML DLL write `%LOCALAPPDATA%\\AzimuthRPC\\logs\\AzimuthRPC.log` (paste that path into Windows Explorer). The native DLL now logs as soon as `FH2ML_Initialize` is called, including rejected host API versions or unsupported game-image checks. If no log is created, first verify the executable actually started or the loader called the DLL initializer; an absent log alone does **not** prove that car offsets changed. Logs can contain runtime telemetry, memory probe values, loaded module names and Discord IPC status, so **review the log before uploading it publicly**.
+Both the standalone EXE and the FH2ML DLL write `%LOCALAPPDATA%\\AzimuthRPC\\logs\\AzimuthRPC.log` (paste that path into Windows Explorer). The native DLL now logs as soon as `fh2mod_init` is called, including rejected host API versions or unsupported game-image checks. If no log is created, first verify the executable actually started or the loader called the DLL initializer; an absent log alone does **not** prove that car offsets changed. Logs can contain runtime telemetry, memory probe values, loaded module names and Discord IPC status, so **review the log before uploading it publicly**.
 
 The **standalone EXE automatically removes `AzimuthRPC.log` and its rotated `.1` log after a normal exit** (tray `Exit`). If it crashes or is force-terminated, logs are kept for troubleshooting. To preserve logs while testing, launch the standalone with `--keep-logs`; copy the log before exiting if you need to share it. Cleanup is best-effort if another process keeps the file open.
 
-The FH2ML native DLL still retains logs: it has no safe, guaranteed shutdown callback, and attempting deletion inside `DllMain` during process teardown could cause instability. Don't run the standalone and native DLL at the same time.
+The FH2 Mod Platform native DLL still retains logs: it has no safe, guaranteed shutdown callback, and attempting deletion inside `DllMain` during process teardown could cause instability. Don't run the standalone and native DLL at the same time.
 
 ### Share diagnostics on Discord (standalone)
 
 Right-click the tray icon and choose **Send logs to Discord...**. A preview shows the exact content and nothing is uploaded until the user clicks Send. The EXE includes only recent diagnostic lines, with common Windows user profile names, credentials, and webhook URLs redacted. Please inspect the preview yourself before sharing.
 
-The app contacts an HTTPS, rate-limited Supabase Edge Function owned by the FH2Mods project. It forwards a text attachment to the Discord support webhook, which is stored in Supabase Vault, **not embedded in the EXE or in GitHub**. This action is optional and does not run at startup or shutdown. The native FH2ML DLL has no tray menu; its logs can still be shared manually.
+The app contacts an HTTPS, rate-limited Supabase Edge Function owned by the FH2Mods project. It forwards a text attachment to the Discord support webhook, which is stored in Supabase Vault, **not embedded in the EXE or in GitHub**. This action is optional and does not run at startup or shutdown. The native FH2 Mod Platform DLL has no tray menu; its logs can still be shared manually.
 
 
 AzimuthRPC does not ask for your Discord password or token. No game files, saves or raw memory captures are included in this repository.
 
 ## Build from source
 
-The managed projects require the **.NET 8 SDK** on Windows x64. Building the native FH2ML DLL additionally requires **Visual Studio Build Tools** and **CMake**.
+The managed projects require the **.NET 8 SDK** on Windows x64. Building the native FH2 Mod Platform DLL additionally requires **Visual Studio Build Tools** and **CMake**.
 
 Standalone build:
 
@@ -91,7 +92,7 @@ Standalone build:
 ./publish.ps1
 ```
 
-Native FH2ML build:
+Native FH2 Mod Platform build:
 
 ```powershell
 ./native/FH2ML.AzimuthRPC/build.ps1
@@ -125,3 +126,5 @@ AzimuthRPC is **source-available**, not OSI open source. The [AzimuthRPC Use-Onl
 ## Disclaimer
 
 AzimuthRPC is an independent fan project by **Refilewski**. It is not affiliated with Microsoft, Xbox, Playground Games, Turn 10, Discord or Azimuth. No game, DLC, game files or license keys are included.
+
+Compatibility note: both runtimes now attempt a bounded, ambiguity-checked fallback if the known car ID field cannot be parsed. This is a hypothesis for Azimuth 1.0.2, **not** an in-game verified fix; see `native/FH2ML.AzimuthRPC/README.md` for diagnostics.
