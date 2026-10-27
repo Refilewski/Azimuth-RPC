@@ -1,17 +1,14 @@
-# AzimuthRPC v0.9.9
+# AzimuthRPC v0.9.10
 
-Discord Rich Presence polish and car-detection diagnostics.
+Native DLL migration to FH2 Mod Platform 2.7.3 and guarded car-ID compatibility recovery.
 
-- "Loading Race" now appears **without a second line**: removes the generic "Forza Horizon 2 via Azimuth" state and prevents a stale car or speed from being shown while loading. This applies to both standalone EXE and native FH2ML DLL.
-- The standalone log now records changes to a compact, privacy-conscious snapshot diagnostic: game UI mode, inferred activity, hook/telemetry status, event context and car ID parse result. No raw game-memory bytes are dumped.
-- Car ID validation now reports a reason such as `empty`, `too-short`, `unterminated`, `invalid-character`, `missing-underscore`, or `ok` so users with missing vehicle names can provide actionable logs.
-- Adds automated regression coverage for race-loading second-line suppression and snapshot diagnostics.
-- Retains v0.9.8 standalone startup log fallback and the log folder shortcut, plus the v0.9.7 native startup diagnostics.
+- Replaces the old FH2ML ABI with `fh2mod_init`, platform registration, logging and game-base discovery.
+- The DLL no longer rejects startup when the game image is not yet mapped.
+- The standalone EXE and native DLL prefer the known `AudioEngine+0x278` car-ID field, and try a bounded, unambiguous candidate within the same object when it is unavailable.
+- Existing Discord IPC, presence, speed, location and game-state handling are unchanged.
+- Platform release package ships the official v2.7.3 loader and required license notices.
+- Synthetic regression covers both relocated and ambiguous car IDs.
 
 ## Compatibility
 
-Still targets FH2 Xbox One 1.0.0.64 through Azimuth. This release does **not** change memory offsets or claim confirmed compatibility with every Azimuth version or mod combination.
-
-## Collecting useful reports
-
-Use `%LOCALAPPDATA%\AzimuthRPC\logs\AzimuthRPC.log` (or the standalone fallback `%TEMP%\AzimuthRPC\AzimuthRPC.log`). Include the **Snapshot diagnostic:** lines with your Azimuth version, other mods such as Extra Options, and whether you used the EXE or FH2ML DLL. Please review/redact any sensitive data before sharing.
+Live gameplay testing on Azimuth 1.0.2 is **still required**. The fallback is a conservative compatibility heuristic, not a confirmed new offset.
