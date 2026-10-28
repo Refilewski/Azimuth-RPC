@@ -7,7 +7,15 @@ add_library(AzimuthRPCMod SHARED AzimuthRpcMod.cpp LocationResolver.cpp)
 target_include_directories(AzimuthRPCMod PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/fh2ml-sdk")
 target_compile_features(AzimuthRPCMod PRIVATE cxx_std_20)
 target_compile_definitions(AzimuthRPCMod PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+target_link_libraries(AzimuthRPCMod PRIVATE ws2_32)
+
 if(MSVC)
     target_compile_options(AzimuthRPCMod PRIVATE /W4 /WX /permissive- /EHsc)
+    set_source_files_properties(AzimuthRpcMod.cpp PROPERTIES
+        COMPILE_OPTIONS "/FI${CMAKE_CURRENT_SOURCE_DIR}/DiscordWineTransportCompat.h")
+else()
+    set_source_files_properties(AzimuthRpcMod.cpp PROPERTIES
+        COMPILE_OPTIONS "-include;${CMAKE_CURRENT_SOURCE_DIR}/DiscordWineTransportCompat.h")
 endif()
+
 set_target_properties(AzimuthRPCMod PROPERTIES OUTPUT_NAME "AzimuthRPC" PREFIX "")
